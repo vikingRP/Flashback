@@ -27,6 +27,8 @@ def main():
         parser.error(f"Archive does not exist: {jar}")
     with zipfile.ZipFile(jar) as archive:
         names = set(archive.namelist())
+        root_packages = {name.rsplit("/", 1)[0] for name in names
+                         if name.endswith(".class") and "/" in name and not name.startswith("META-INF/")}
         required = [
             "META-INF/mods.toml", "META-INF/accesstransformer.cfg", "META-INF/jarjar/metadata.json",
             "META-INF/licenses/Lattice-MIT.txt", "flashback.refmap.json", "pack.mcmeta",
@@ -63,7 +65,12 @@ def main():
                             check(archive.read(item["path"]) == original.read(item["path"]),
                                   f"Nested archive bytes changed during shading/reobfuscation: {item['path']}")
                     with zipfile.ZipFile(io.BytesIO(archive.read(item["path"]))) as dependency:
-                        check(any(name.endswith(".class") for name in dependency.namelist()), f"Empty bootstrap dependency: {item['path']}")
+                        nested_classes = [name for name in dependency.namelist() if name.endswith(".class")]
+                        check(nested_classes, f"Empty bootstrap dependency: {item['path']}")
+                        # Java modules may not share a package: Forge refuses to start when a nested mod's
+                        # package is also exported by this archive ("Modules X and Y export package ...").
+                        split = {name.rsplit("/", 1)[0] for name in nested_classes if "/" in name} & root_packages
+                        check(not split, f"Nested mod packages also at archive root: {item['path']} {sorted(split)[:3]}")
         for name in names:
             if name.endswith(".class"):
                 data = archive.read(name)

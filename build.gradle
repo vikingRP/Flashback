@@ -145,21 +145,19 @@ jar {
 tasks.named('jarJar') { archiveClassifier = 'jij' }
 shadowJar {
     dependsOn tasks.named('jarJar')
-    from({ zipTree(tasks.named('jarJar').get().archiveFile.get().asFile) }) {
-        include 'META-INF/jarjar/**'
-    }
     configurations = [project.configurations.embedded]
     archiveClassifier = ''
     mergeServiceFiles()
     exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA'
     exclude 'module-info.class', 'META-INF/versions/**/module-info.class'
     exclude 'fabric.mod.json'
-    // Shadow expands copied jar files. Restore JarJar payloads verbatim after shading,
-    // otherwise metadata remains while the Forge bootstrap archives disappear.
+    // Shadow unpacks every jar it copies. Nested Forge mods must never pass through it: their classes would
+    // land beside Flashback's, and Forge would then see two modules exporting the same package
+    // (e.g. com.llamalad7.mixinextras.platform.forge). Add the JarJar payload and metadata verbatim afterwards.
     doLast {
         ant.zip(destfile: archiveFile.get().asFile, update: true) {
             zipfileset(src: tasks.named('jarJar').get().archiveFile.get().asFile,
-                       includes: 'META-INF/jarjar/*.jar')
+                       includes: 'META-INF/jarjar/**')
         }
     }
     finalizedBy 'reobfShadowJar'
