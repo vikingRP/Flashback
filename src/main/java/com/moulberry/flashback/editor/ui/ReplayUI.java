@@ -27,7 +27,6 @@ import com.moulberry.flashback.platform.ForgePlatform;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.LevelLoadingScreen;
 import net.minecraft.client.gui.screens.LoadingOverlay;
-import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.gui.screens.ProgressScreen;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
@@ -905,16 +904,6 @@ public class ReplayUI {
         }
 
         ExportDoneWindow.render();
-
-        // Open the vanilla pause menu on Escape so options/keybinds stay reachable while the
-        // replay UI (timeline, menu bar, etc.) is up, even when none of its windows are focused.
-        // Runs last so any popup/dialog that wants to consume Escape itself (e.g. tip of the day,
-        // keyframe popups) gets first refusal.
-        if (Minecraft.getInstance().screen == null && !ImGui.isPopupOpen("", ImGuiPopupFlags.AnyPopup)
-                && !ReplayUI.getIO().getWantTextInput() && ReplayUI.consumeCancel()) {
-            imguiWindower.ungrab();
-            Minecraft.getInstance().setScreen(new PauseScreen(false));
-        }
 
         popupOpenLastFrame = ImGui.isPopupOpen("", ImGuiPopupFlags.AnyPopup);
 

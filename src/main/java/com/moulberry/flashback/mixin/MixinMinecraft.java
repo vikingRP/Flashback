@@ -442,7 +442,8 @@ public abstract class MixinMinecraft extends ReentrantBlockableEventLoop<Runnabl
 
     @Inject(method = "pauseGame", at = @At("HEAD"), cancellable = true)
     public void pauseIfInactive(boolean pauseOnly, CallbackInfo ci) {
-        if (Flashback.isInReplay()) {
+        // Only suppress the automatic pause on focus loss; Escape must still open the pause menu
+        if (Flashback.isInReplay() && !((Minecraft) (Object) this).isWindowActive()) {
             ci.cancel();
         }
     }
