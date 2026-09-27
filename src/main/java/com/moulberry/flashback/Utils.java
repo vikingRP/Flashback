@@ -6,13 +6,22 @@ import com.moulberry.flashback.state.EditorStateManager;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.contents.PlainTextContents;
+import net.minecraft.network.chat.contents.LiteralContents;
+import net.minecraft.network.chat.ComponentContents;
 
 import java.lang.reflect.Field;
 import java.time.LocalDateTime;
 import java.util.Random;
 
 public class Utils {
+
+    public static net.minecraft.world.entity.Entity getEntityByUuid(net.minecraft.client.multiplayer.ClientLevel level, java.util.UUID uuid) {
+        if (level == null) return null;
+        for (var entity : level.entitiesForRendering()) {
+            if (entity.getUUID().equals(uuid)) return entity;
+        }
+        return null;
+    }
 
     /*
      *  I love Utils.java, very cool, thank you
@@ -197,9 +206,9 @@ public class Utils {
 
         boolean isSelfEmpty = false;
 
-        if (component.getContents() == PlainTextContents.EMPTY) {
+        if (component.getContents() == ComponentContents.EMPTY) {
             isSelfEmpty = true;
-        } else if (component.getContents() instanceof PlainTextContents plainTextContents) {
+        } else if (component.getContents() instanceof LiteralContents plainTextContents) {
             isSelfEmpty = ChatFormatting.stripFormatting(plainTextContents.text()).isEmpty();
         }
 

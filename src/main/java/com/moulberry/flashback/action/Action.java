@@ -1,12 +1,12 @@
 package com.moulberry.flashback.action;
 
 import com.moulberry.flashback.playback.ReplayServer;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.resources.Identifier;
+import com.moulberry.flashback.io.ReplayBuffer;
+import net.minecraft.resources.ResourceLocation;
 
 public interface Action {
 
-    Identifier name();
-    void handle(ReplayServer replayServer, RegistryFriendlyByteBuf friendlyByteBuf);
+    ResourceLocation name();
+    void handle(ReplayServer replayServer, ReplayBuffer friendlyByteBuf);
 
 }

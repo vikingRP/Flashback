@@ -2,20 +2,20 @@ package com.moulberry.flashback.packet;
 
 import com.moulberry.flashback.Flashback;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.moulberry.flashback.packet.PacketCodec;
+import com.moulberry.flashback.packet.FlashbackPayload;
 
-public record FlashbackRemoteSelectHotbarSlot(int entityId, int slot) implements CustomPacketPayload {
+public record FlashbackRemoteSelectHotbarSlot(int entityId, int slot) implements FlashbackPayload {
     public static final Type<FlashbackRemoteSelectHotbarSlot> TYPE = new Type<>(Flashback.createIdentifier("remote_select_hotbar_slot"));
 
-    public static final StreamCodec<FriendlyByteBuf, FlashbackRemoteSelectHotbarSlot> STREAM_CODEC = new RemoteSelectHotbarSlotStreamCodec();
+    public static final PacketCodec<FriendlyByteBuf, FlashbackRemoteSelectHotbarSlot> STREAM_CODEC = new RemoteSelectHotbarSlotPacketCodec();
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
+    public Type<? extends FlashbackPayload> type() {
         return TYPE;
     }
 
-    public static class RemoteSelectHotbarSlotStreamCodec implements StreamCodec<FriendlyByteBuf, FlashbackRemoteSelectHotbarSlot> {
+    public static class RemoteSelectHotbarSlotPacketCodec implements PacketCodec<FriendlyByteBuf, FlashbackRemoteSelectHotbarSlot> {
         @Override
         public FlashbackRemoteSelectHotbarSlot decode(FriendlyByteBuf friendlyByteBuf) {
             int entityId = friendlyByteBuf.readVarInt();

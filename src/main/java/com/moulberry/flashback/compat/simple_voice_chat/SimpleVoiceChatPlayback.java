@@ -38,13 +38,11 @@ public class SimpleVoiceChatPlayback {
             }
 
             boolean whispering = false;
-            switch (sound) {
-                case FlashbackVoiceChatSound.SoundStatic soundStatic -> {
+            if (sound instanceof FlashbackVoiceChatSound.SoundStatic) {
                     ClientStaticAudioChannel channel = staticAudioChannelCache.get(source,
                         () -> SimpleVoiceChatPlugin.CLIENT_API.createStaticAudioChannel(source));
                     channel.play(sound.samples());
-                }
-                case FlashbackVoiceChatSound.SoundLocational soundLocational -> {
+            } else if (sound instanceof FlashbackVoiceChatSound.SoundLocational soundLocational) {
                     Vec3 pos = soundLocational.position();
                     Position position = SimpleVoiceChatPlugin.CLIENT_API.createPosition(pos.x, pos.y, pos.z);
                     ClientLocationalAudioChannel channel = locationAudioChannelCache.get(source,
@@ -52,17 +50,13 @@ public class SimpleVoiceChatPlayback {
                     channel.setLocation(position);
                     channel.setDistance(soundLocational.distance());
                     channel.play(sound.samples());
-                }
-                case FlashbackVoiceChatSound.SoundEntity soundEntity -> {
+            } else if (sound instanceof FlashbackVoiceChatSound.SoundEntity soundEntity) {
                     ClientEntityAudioChannel channel = entityAudioChannelCache.get(source,
                         () -> SimpleVoiceChatPlugin.CLIENT_API.createEntityAudioChannel(source));
                     channel.setWhispering(soundEntity.whispering());
                     channel.setDistance(soundEntity.distance());
                     channel.play(sound.samples());
                     whispering = soundEntity.whispering();
-                }
-                default -> {
-                }
             }
 
             ((VoicechatClientApiExtension) SimpleVoiceChatPlugin.CLIENT_API).updateAudioLevel(sound.source(), null, whispering, sound.samples());

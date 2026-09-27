@@ -45,6 +45,9 @@ public class PixelFormatHelper {
 
     private static int calculateBestPixelFormat(String codecName, int srcPixelFormat, boolean transparent) {
         try (AVCodec codec = avcodec.avcodec_find_encoder_by_name(codecName)) {
+            if (codec == null) {
+                throw new IllegalArgumentException("FFmpeg encoder is not available: " + codecName);
+            }
             IntList supportedFormats = new IntArrayList();
 
             IntPointer pixFmts = codec.pix_fmts();

@@ -2,36 +2,35 @@ package com.moulberry.flashback.packet;
 
 import com.moulberry.flashback.Flashback;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.moulberry.flashback.packet.PacketCodec;
+import com.moulberry.flashback.packet.FlashbackPayload;
 import net.minecraft.util.ExtraCodecs;
 import net.minecraft.world.item.ItemStack;
 
-public record FlashbackRemoteSetSlot(int entityId, int slot, ItemStack itemStack) implements CustomPacketPayload {
+public record FlashbackRemoteSetSlot(int entityId, int slot, ItemStack itemStack) implements FlashbackPayload {
     public static final Type<FlashbackRemoteSetSlot> TYPE = new Type<>(Flashback.createIdentifier("remote_set_slot"));
 
-    public static final StreamCodec<RegistryFriendlyByteBuf, FlashbackRemoteSetSlot> STREAM_CODEC = new RemoteSetSlotStreamCodec();
+    public static final PacketCodec<FriendlyByteBuf, FlashbackRemoteSetSlot> STREAM_CODEC = new RemoteSetSlotPacketCodec();
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
+    public Type<? extends FlashbackPayload> type() {
         return TYPE;
     }
 
-    public static class RemoteSetSlotStreamCodec implements StreamCodec<RegistryFriendlyByteBuf, FlashbackRemoteSetSlot> {
+    public static class RemoteSetSlotPacketCodec implements PacketCodec<FriendlyByteBuf, FlashbackRemoteSetSlot> {
         @Override
-        public FlashbackRemoteSetSlot decode(RegistryFriendlyByteBuf friendlyByteBuf) {
+        public FlashbackRemoteSetSlot decode(FriendlyByteBuf friendlyByteBuf) {
             int entityId = friendlyByteBuf.readVarInt();
             int slot = friendlyByteBuf.readByte();
-            ItemStack itemStack = ItemStack.OPTIONAL_STREAM_CODEC.decode(friendlyByteBuf);
+            ItemStack itemStack = friendlyByteBuf.readItem();
             return new FlashbackRemoteSetSlot(entityId, slot, itemStack);
         }
 
         @Override
-        public void encode(RegistryFriendlyByteBuf friendlyByteBuf, FlashbackRemoteSetSlot remoteHotbarSlot) {
+        public void encode(FriendlyByteBuf friendlyByteBuf, FlashbackRemoteSetSlot remoteHotbarSlot) {
             friendlyByteBuf.writeVarInt(remoteHotbarSlot.entityId);
             friendlyByteBuf.writeByte(remoteHotbarSlot.slot);
-            ItemStack.OPTIONAL_STREAM_CODEC.encode(friendlyByteBuf, remoteHotbarSlot.itemStack);
+            friendlyByteBuf.writeItem(remoteHotbarSlot.itemStack);
         }
     }
 

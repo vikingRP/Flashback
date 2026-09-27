@@ -1,64 +1,25 @@
 package com.moulberry.flashback.mixin.playback;
-
 import com.moulberry.flashback.Flashback;
-import com.moulberry.flashback.packet.FinishedServerTick;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientCommonPacketListenerImpl;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.PacketUtils;
-import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
-import net.minecraft.network.protocol.common.ClientboundResourcePackPushPacket;
-import org.jetbrains.annotations.Nullable;
-import org.spongepowered.asm.mixin.Final;
+import net.minecraft.network.protocol.game.ClientboundResourcePackPacket;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
-import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.*;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
-
-import java.net.URL;
-import java.util.UUID;
-
-@Mixin(ClientCommonPacketListenerImpl.class)
+@Mixin(ClientPacketListener.class)
 public abstract class MixinClientCommonPacketListenerImpl {
-
-    @Shadow
-    @Final
-    protected Minecraft minecraft;
-
-    @Shadow
-    @Nullable
-    private static URL parseResourcePackUrl(String string) {
-        return null;
-    }
-
-    /**
-     * Removes the resource pack prompt screen in replays
-     */
-    @Inject(method = "handleResourcePackPush", at = @At("HEAD"), cancellable = true)
-    public void handleResourcePackPush(ClientboundResourcePackPushPacket clientboundResourcePackPushPacket, CallbackInfo ci) {
+    @Inject(method="handleResourcePack", at=@At("HEAD"), cancellable=true)
+    private void replayResourcePack(ClientboundResourcePackPacket packet, CallbackInfo ci) {
         if (Flashback.isInReplay()) {
-            PacketUtils.ensureRunningOnSameThread(clientboundResourcePackPushPacket, (ClientCommonPacketListenerImpl)(Object)this, this.minecraft.packetProcessor());
-
-            UUID uuid = clientboundResourcePackPushPacket.id();
-            URL uRL = parseResourcePackUrl(clientboundResourcePackPushPacket.url());
-            if (uRL != null) {
-                String string = clientboundResourcePackPushPacket.hash();
-                this.minecraft.getDownloadedPackSource().allowServerPacks();
-                this.minecraft.getDownloadedPackSource().pushPack(uuid, uRL, string);
-            }
-
+            Minecraft minecraft = Minecraft.getInstance();
+            PacketUtils.ensureRunningOnSameThread(packet, (ClientPacketListener)(Object)this, minecraft);
+            try {
+                java.net.URL url = new java.net.URL(packet.getUrl());
+                if (url.getProtocol().equals("https") || url.getProtocol().equals("http"))
+                    minecraft.getDownloadedPackSource().downloadAndSelectResourcePack(url, packet.getHash(), true);
+            } catch (java.net.MalformedURLException exception) { Flashback.LOGGER.warn("Invalid replay resource pack URL", exception); }
             ci.cancel();
         }
     }
-
-    @Inject(method = "handleCustomPayload(Lnet/minecraft/network/protocol/common/ClientboundCustomPayloadPacket;)V", at = @At("HEAD"), cancellable = true)
-    public void handleCustomPayload(ClientboundCustomPayloadPacket clientboundCustomPayloadPacket, CallbackInfo ci) {
-        if (clientboundCustomPayloadPacket.payload() == FinishedServerTick.INSTANCE) {
-            if (Flashback.EXPORT_JOB != null) {
-                Flashback.EXPORT_JOB.onFinishedServerTick();
-            }
-            ci.cancel();
-        }
-    }
-
 }

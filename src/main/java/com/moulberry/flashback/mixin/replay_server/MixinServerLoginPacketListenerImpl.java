@@ -27,21 +27,13 @@ public abstract class MixinServerLoginPacketListenerImpl {
     @Final
     MinecraftServer server;
 
-    @Shadow
-    abstract void startClientVerification(GameProfile gameProfile);
+    @Shadow public GameProfile gameProfile;
 
-    @Shadow
-    @Nullable
-    String requestedUsername;
-
-    @Inject(method = "handleHello", at = @At("HEAD"), cancellable = true)
+    @Inject(method = "handleHello", at = @At("RETURN"))
     public void handleHello(ServerboundHelloPacket serverboundHelloPacket, CallbackInfo ci) {
         if (this.server instanceof ReplayServer) {
-            this.requestedUsername = ReplayServer.REPLAY_VIEWER_NAME;
             UUID replayViewerUUID = UUID.nameUUIDFromBytes(serverboundHelloPacket.name().getBytes(StandardCharsets.UTF_8));
-            GameProfile gameProfile = new GameProfile(replayViewerUUID, ReplayServer.REPLAY_VIEWER_NAME);
-            this.startClientVerification(gameProfile);
-            ci.cancel();
+            this.gameProfile = new GameProfile(replayViewerUUID, ReplayServer.REPLAY_VIEWER_NAME);
         }
     }
 

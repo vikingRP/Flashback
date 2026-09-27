@@ -50,10 +50,10 @@ public class ExportDoneWindow {
             Objects.requireNonNull(this.thumbnail);
 
             if (this.uploaded == null) {
-                this.uploaded = new DynamicTexture(() -> "flashback export thumbnail", this.thumbnail);;
+                this.uploaded = new DynamicTexture(this.thumbnail);;
             }
 
-            return ReplayUI.imguiRenderer.getTextureId(this.uploaded.getTextureView());
+            return ReplayUI.imguiRenderer.getTextureId(this.uploaded.getId());
         }
     }
 
@@ -125,10 +125,10 @@ public class ExportDoneWindow {
                     }
 
                     if (ImGui.imageButton("ExportThumbnail", id, new ImVec2(width, height))) {
-                        Blaze3D.openPath(entry.outputLocation);
+                        net.minecraft.Util.getPlatform().openFile(entry.outputLocation.toFile());
                     }
                 } else if (ImGui.button(I18n.get("flashback.export_done.missing_thumbnail"), DESIRED_W+padding.x*2, DESIRED_H+padding.y*2)) {
-                    Blaze3D.openPath(entry.outputLocation);
+                    net.minecraft.Util.getPlatform().openFile(entry.outputLocation.toFile());
                 }
 
                 ImGui.sameLine();
@@ -153,14 +153,14 @@ public class ExportDoneWindow {
 
                 if (entry.outputIsFolder) {
                     if (ImGui.button(I18n.get("flashback.open_folder"))) {
-                        Blaze3D.openPath(entry.outputLocation);
+                        net.minecraft.Util.getPlatform().openFile(entry.outputLocation.toFile());
                     }
                 } else {
                     if (ImGui.button(I18n.get("flashback.open_file"))) {
-                        Blaze3D.openPath(entry.outputLocation);
+                        net.minecraft.Util.getPlatform().openFile(entry.outputLocation.toFile());
                     }
                     if (ImGui.button(I18n.get("flashback.open_folder"))) {
-                        Blaze3D.openPath(entry.outputLocation.getParent());
+                        net.minecraft.Util.getPlatform().openFile(entry.outputLocation.getParent().toFile());
                     }
                 }
 

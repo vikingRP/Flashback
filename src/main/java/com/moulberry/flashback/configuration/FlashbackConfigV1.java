@@ -28,7 +28,7 @@ import com.moulberry.lattice.annotation.widget.LatticeWidgetMessage;
 import com.moulberry.lattice.annotation.widget.LatticeWidgetSlider;
 import com.moulberry.lattice.annotation.widget.LatticeWidgetTextArea;
 import com.moulberry.lattice.annotation.widget.LatticeWidgetTextField;
-import net.fabricmc.loader.api.FabricLoader;
+import com.moulberry.flashback.platform.ForgePlatform;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.network.chat.Component;
 
@@ -103,7 +103,7 @@ public class FlashbackConfigV1 {
         public boolean recordVoiceChat = false;
 
         public boolean hasSimpleVoiceChat() {
-            return FabricLoader.getInstance().isModLoaded("voicechat");
+            return ForgePlatform.getInstance().isModLoaded("voicechat");
         }
 
         @LatticeOption(title = "flashback.option.recording.record_bobby_chunks", description = "!!.description")
@@ -382,7 +382,7 @@ public class FlashbackConfigV1 {
     public void saveToDefaultFolder() {
         Keybinds.save(this);
 
-        Path configFolder = FabricLoader.getInstance().getConfigDir().resolve("flashback");
+        Path configFolder = ForgePlatform.getInstance().getConfigDir().resolve("flashback");
         this.saveToFolder(configFolder);
         this.saveDelay = 0;
     }

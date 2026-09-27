@@ -1,0 +1,4 @@
+Lattice 1.2.18, Copyright (c) 2025 Moulberry
+Source: https://github.com/Moulberry/Lattice
+Vendored from commit 7a7dd05, common and 1.20.1 sources.
+Included under the MIT license (Lattice-MIT.txt).

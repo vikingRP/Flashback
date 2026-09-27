@@ -57,11 +57,11 @@ public class PlayerListWindow {
         for (PlayerInfo playerInfo : connection.getOnlinePlayers()) {
             GameProfile profile = playerInfo.getProfile();
 
-            if (profile.id().equals(Minecraft.getInstance().player.getUUID())) {
+            if (profile.getId().equals(Minecraft.getInstance().player.getUUID())) {
                 continue;
             }
 
-            if (profile.id().version() != 4) {
+            if (profile.getId().version() != 4) {
                 hasNpcs = true;
                 if (!includeNpcs) {
                     continue;
@@ -71,7 +71,7 @@ public class PlayerListWindow {
             double distanceSq = Double.MAX_VALUE;
 
             if (level != null && camera != null) {
-                Player player = level.getPlayerByUUID(profile.id());
+                Player player = level.getPlayerByUUID(profile.getId());
                 if (player != null) {
                     distanceSq = player.distanceToSqr(camera);
                 }
@@ -81,7 +81,7 @@ public class PlayerListWindow {
             if (blankSearch) {
                 searchEntries.add(searchEntry);
             } else {
-                String nameLower = profile.name().toLowerCase(Locale.ROOT);
+                String nameLower = profile.getName().toLowerCase(Locale.ROOT);
                 if (nameLower.startsWith(searchLower)) {
                     searchEntries.add(searchEntry);
                 } else if (nameLower.contains(searchLower)) {
@@ -140,10 +140,10 @@ public class PlayerListWindow {
                 PlayerInfo playerInfo = searchedPlayers.get(i);
                 GameProfile profile = playerInfo.getProfile();
 
-                ImGui.textUnformatted(profile.name());
+                ImGui.textUnformatted(profile.getName());
                 ImGui.sameLine();
                 if (ImGui.smallButton(I18n.get("flashback.tp"))) {
-                    Minecraft.getInstance().getConnection().sendCommand("teleport " + profile.id());
+                    Minecraft.getInstance().getConnection().sendCommand("teleport " + profile.getId());
                     lastUpdate = currentTime;
                 }
                 if (editorState != null) {
@@ -153,19 +153,19 @@ public class PlayerListWindow {
                         ImGui.smallButton(I18n.get("flashback.show"));
                         ImGui.endDisabled();
                         ImGui.setItemTooltip(I18n.get("flashback.hidden_because_spectator"));
-                    } else if (editorState.hideDuringExport.contains(profile.id())) {
+                    } else if (editorState.hideDuringExport.contains(profile.getId())) {
                         if (ImGui.smallButton(I18n.get("flashback.show"))) {
-                            editorState.hideDuringExport.remove(profile.id());
+                            editorState.hideDuringExport.remove(profile.getId());
                             lastUpdate = currentTime;
                         }
                     } else if (ImGui.smallButton(I18n.get("flashback.hide"))) {
-                        editorState.hideDuringExport.add(profile.id());
+                        editorState.hideDuringExport.add(profile.getId());
                         lastUpdate = currentTime;
                     }
                 }
                 ImGui.sameLine();
                 if (ImGui.smallButton(I18n.get("flashback.spectate"))) {
-                    Minecraft.getInstance().getConnection().sendCommand("spectate " + profile.id());
+                    Minecraft.getInstance().getConnection().sendCommand("spectate " + profile.getId());
                     lastUpdate = currentTime;
                 }
                 ImGui.popID();
@@ -203,27 +203,27 @@ public class PlayerListWindow {
         for (PlayerInfo playerInfo : connection.getOnlinePlayers()) {
             GameProfile profile = playerInfo.getProfile();
 
-            if (profile.id().equals(Minecraft.getInstance().player.getUUID())) {
+            if (profile.getId().equals(Minecraft.getInstance().player.getUUID())) {
                 continue;
             }
 
-            if (profile.id().version() != 4 && !includeNpcs) {
+            if (profile.getId().version() != 4 && !includeNpcs) {
                 continue;
             }
 
             if (blankSearch) {
                 if (visible) {
-                    editorState.hideDuringExport.remove(profile.id());
+                    editorState.hideDuringExport.remove(profile.getId());
                 } else {
-                    editorState.hideDuringExport.add(profile.id());
+                    editorState.hideDuringExport.add(profile.getId());
                 }
             } else {
-                String nameLower = profile.name().toLowerCase(Locale.ROOT);
+                String nameLower = profile.getName().toLowerCase(Locale.ROOT);
                 if (nameLower.contains(searchLower)) {
                     if (visible) {
-                        editorState.hideDuringExport.remove(profile.id());
+                        editorState.hideDuringExport.remove(profile.getId());
                     } else {
-                        editorState.hideDuringExport.add(profile.id());
+                        editorState.hideDuringExport.add(profile.getId());
                     }
                 }
             }

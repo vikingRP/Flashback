@@ -1,96 +1,85 @@
 package com.moulberry.flashback.exporting;
 
 import com.mojang.blaze3d.pipeline.RenderTarget;
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.renderpearl.api.GpuFormat;
-import com.mojang.renderpearl.api.commands.RenderPass;
-import com.mojang.renderpearl.api.textures.FilterMode;
-import com.mojang.renderpearl.api.textures.GpuTexture;
-import com.mojang.renderpearl.api.textures.GpuTextureView;
 import com.moulberry.flashback.editor.ui.ReplayUI;
 import com.moulberry.flashback.visuals.ShaderManager;
 import org.jetbrains.annotations.Nullable;
-import org.joml.Vector4f;
-
-import java.nio.FloatBuffer;
 import java.util.ArrayDeque;
 import java.util.Objects;
-import java.util.Optional;
+import static org.lwjgl.opengl.GL33.*;
 
-public class SaveableFramebufferQueue implements AutoCloseable {
-
-    private static final Vector4f CLEAR_COLOR = new Vector4f(0.0f);
-
-    private final int width;
-    private final int height;
-
+public final class SaveableFramebufferQueue implements AutoCloseable {
+    private final int width, height;
     private final ArrayDeque<SaveableFramebuffer> available = new ArrayDeque<>();
     private final ArrayDeque<SaveableFramebuffer> waiting = new ArrayDeque<>();
-
-    private final GpuTexture flipBuffer;
-    private final GpuTextureView flipBufferView;
-    private final GpuTexture flipDepthBuffer;
-    private final GpuTextureView flipDepthBufferView;
-
+    private final int flipBuffer, flipDepthBuffer, flipFramebuffer, flipDepthFramebuffer;
     private final TransformDepthUniform transformDepthUniform = new TransformDepthUniform();
 
     public SaveableFramebufferQueue(int width, int height) {
         this.width = width;
         this.height = height;
+        int previousTexture = glGetInteger(GL_TEXTURE_BINDING_2D);
+        int previousFramebuffer = glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING);
+        try {
+            flipBuffer = createTexture(GL_RGBA8, GL_RGBA, GL_UNSIGNED_BYTE);
+            flipFramebuffer = createFramebuffer(flipBuffer);
+            flipDepthBuffer = createTexture(GL_R32F, GL_RED, GL_FLOAT);
+            flipDepthFramebuffer = createFramebuffer(flipDepthBuffer);
+        } finally {
+            glBindTexture(GL_TEXTURE_2D, previousTexture);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, previousFramebuffer);
+        }
+    }
 
-        this.flipBuffer = RenderSystem.getDevice().createTexture(() -> "flip buffer", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_RENDER_ATTACHMENT,
-            GpuFormat.RGBA8_UNORM, width, height, 1, 1);
-        this.flipBufferView = RenderSystem.getDevice().createTextureView(this.flipBuffer);
+    private int createTexture(int internalFormat, int format, int type) {
+        int texture = glGenTextures();
+        glBindTexture(GL_TEXTURE_2D, texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0, format, type, 0L);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        return texture;
+    }
 
-        this.flipDepthBuffer = RenderSystem.getDevice().createTexture(() -> "flip depth buffer", GpuTexture.USAGE_COPY_DST | GpuTexture.USAGE_RENDER_ATTACHMENT,
-            GpuFormat.R32_FLOAT, width, height, 1, 1);
-        this.flipDepthBufferView = RenderSystem.getDevice().createTextureView(this.flipDepthBuffer);
+    private int createFramebuffer(int texture) {
+        int framebuffer = glGenFramebuffers();
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, framebuffer);
+        glFramebufferTexture2D(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+        if (glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+            throw new IllegalStateException("Flashback export framebuffer is incomplete");
+        return framebuffer;
     }
 
     public SaveableFramebuffer take() {
-        if (this.available.isEmpty()) {
-            return new SaveableFramebuffer(this.width, this.height);
-        } else {
-            return this.available.removeFirst();
-        }
-    }
-
-    private void blitFlip(RenderTarget src, boolean supersampling) {
-        FilterMode filterMode = supersampling ? FilterMode.LINEAR : FilterMode.NEAREST;
-
-        try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(() -> "flashback flip pass", this.flipBufferView, Optional.of(CLEAR_COLOR))) {
-            renderPass.setPipeline(RenderSystem.getCompiledPipeline(ShaderManager.BLIT_SCREEN_FLIP));
-            RenderSystem.bindDefaultUniforms(renderPass);
-            renderPass.setUniform("InSampler", src.getColorTextureView(), RenderSystem.getSamplerCache().getClampToEdge(filterMode));
-            renderPass.draw(3, 1, 0, 0);
-        }
-    }
-
-    private void blitTransformDepth(RenderTarget src) {
-        var uniforms = this.transformDepthUniform.getOrUpdate(ReplayUI.lastProjectionMatrix);
-
-        try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(() -> "flashback depth flip pass", this.flipDepthBufferView, Optional.of(CLEAR_COLOR))) {
-            renderPass.setPipeline(RenderSystem.getCompiledPipeline(ShaderManager.BLIT_TRANSFORM_DEPTH));
-            RenderSystem.bindDefaultUniforms(renderPass);
-            renderPass.setUniform("TransformDepth", uniforms);
-            renderPass.setUniform("InSampler", src.getDepthTextureView(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
-            renderPass.draw(3, 1, 0, 0);
-        }
+        return available.isEmpty() ? new SaveableFramebuffer(width, height) : available.removeFirst();
     }
 
     public void startDownload(RenderTarget target, SaveableFramebuffer texture, boolean supersampling) {
-        // Do an inline flip
-        this.blitFlip(target, supersampling);
-
-        texture.startDownload(this.flipBuffer);
-        this.waiting.add(texture);
+        int previousTexture = glGetInteger(GL_TEXTURE_BINDING_2D);
+        glBindTexture(GL_TEXTURE_2D, target.getColorTextureId());
+        int min = glGetTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER);
+        int mag = glGetTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER);
+        try {
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, supersampling ? GL_LINEAR : GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, supersampling ? GL_LINEAR : GL_NEAREST);
+            ShaderManager.blit(target.getColorTextureId(), flipFramebuffer, width, height, 0, 0, 1, 1, false, true, false, 0, 0);
+        } finally {
+            glBindTexture(GL_TEXTURE_2D, target.getColorTextureId());
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, min);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, mag);
+            glBindTexture(GL_TEXTURE_2D, previousTexture);
+        }
+        texture.startDownload(flipFramebuffer, false);
+        waiting.add(texture);
     }
 
     public void startDepthDownload(RenderTarget target, SaveableFramebuffer texture) {
-        this.blitTransformDepth(target);
-
-        texture.startDownload(this.flipDepthBuffer);
-        this.waiting.add(texture);
+        var parameters = transformDepthUniform.getOrUpdate(ReplayUI.lastProjectionMatrix);
+        ShaderManager.blit(target.getDepthTextureId(), flipDepthFramebuffer, width, height, 0, 0, 1, 1,
+            false, true, false, parameters.near(), parameters.far());
+        texture.startDownload(flipDepthFramebuffer, true);
+        waiting.add(texture);
     }
 
     public @Nullable ImageFrame finishDownload() {
@@ -161,7 +150,7 @@ public class SaveableFramebufferQueue implements AutoCloseable {
         }
         this.waiting.clear();
         this.available.clear();
-        this.flipBuffer.close();
+        glDeleteTextures(flipBuffer); glDeleteTextures(flipDepthBuffer); glDeleteFramebuffers(flipFramebuffer); glDeleteFramebuffers(flipDepthFramebuffer);
         this.transformDepthUniform.close();
     }
 

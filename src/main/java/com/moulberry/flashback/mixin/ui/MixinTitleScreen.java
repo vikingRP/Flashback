@@ -85,8 +85,8 @@ public class MixinTitleScreen extends Screen {
                     continue;
                 }
                 if (renderable instanceof AbstractWidget otherWidget) {
-                    if (x < otherWidget.getRight() && x+width > otherWidget.getX() &&
-                        y < otherWidget.getBottom() && y+height > otherWidget.getY()) {
+                    if (x < (otherWidget.getX() + otherWidget.getWidth()) && x+width > otherWidget.getX() &&
+                        y < (otherWidget.getY() + otherWidget.getHeight()) && y+height > otherWidget.getY()) {
                         overlapsWithExistingButton = true;
                         break;
                     }
@@ -110,7 +110,7 @@ public class MixinTitleScreen extends Screen {
                 }
 
                 int size = widget.getHeight();
-                int x = widget.getRight() + 4 + size * offsetX;
+                int x = (widget.getX() + widget.getWidth()) + 4 + size * offsetX;
                 int y = widget.getY();
 
                 boolean overlapsWithExistingButton = false;
@@ -121,8 +121,8 @@ public class MixinTitleScreen extends Screen {
                         continue;
                     }
                     if (renderable instanceof AbstractWidget otherWidget) {
-                        if (x < otherWidget.getRight() && x+size > otherWidget.getX() &&
-                            y < otherWidget.getBottom() && y+size > otherWidget.getY()) {
+                        if (x < (otherWidget.getX() + otherWidget.getWidth()) && x+size > otherWidget.getX() &&
+                            y < (otherWidget.getY() + otherWidget.getHeight()) && y+size > otherWidget.getY()) {
                             overlapsWithExistingButton = true;
                             break;
                         }
@@ -132,21 +132,22 @@ public class MixinTitleScreen extends Screen {
                 if (!overlapsWithExistingButton) {
                     if (this.openSelectReplayScreenButton == null) {
                         this.openSelectReplayScreenButton = new FlashbackButton(x, y, size, size, Component.translatable("flashback.open_replays"), button -> {
-                            List<String> incompatibleMods = this.minecraft.hasShiftDown() ? List.of() : Flashback.getReplayIncompatibleMods();
+                            List<String> incompatibleMods = Screen.hasShiftDown() ? List.of() : Flashback.getReplayIncompatibleMods();
 
                             if (incompatibleMods.isEmpty()) {
-                                this.minecraft.gui.setScreen(new SelectReplayScreen(this));
+                                this.minecraft.setScreen(new SelectReplayScreen(this));
                             } else {
                                 String mods = StringUtils.join(incompatibleMods, ", ");
                                 Component description = Component.translatable("flashback.incompatible_with_viewing_description").append(Component.literal(mods).withStyle(ChatFormatting.RED));
-                                this.minecraft.gui.setScreen(new AlertScreen(() -> Minecraft.getInstance().gui.setScreen(this),
+                                this.minecraft.setScreen(new AlertScreen(() -> Minecraft.getInstance().setScreen(this),
                                     Component.translatable("flashback.incompatible_with_viewing"), description));
                             }
 
                         });
                         this.addRenderableWidget(this.openSelectReplayScreenButton);
                     } else {
-                        this.openSelectReplayScreenButton.setPosition(x, y);
+                        this.openSelectReplayScreenButton.setX(x);
+                        this.openSelectReplayScreenButton.setY(y);
                     }
                     return;
                 }
@@ -164,7 +165,7 @@ public class MixinTitleScreen extends Screen {
     }
 
     @Inject(method = "createNormalMenuOptions", at = @At("HEAD"))
-    public void createNormalMenuOptions(int i, int j, CallbackInfoReturnable<Integer> cir) {
+    public void createNormalMenuOptions(int i, int j, CallbackInfo ci) {
         this.normalMenuWidgets.clear();
     }
 

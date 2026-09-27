@@ -144,9 +144,7 @@ public class EditorState {
 
         Camera dummyCamera = new Camera();
         dummyCamera.eyeHeight = sourceEntity.getEyeHeight();
-        dummyCamera.setLevel(level);
-        dummyCamera.setEntity(sourceEntity);
-        dummyCamera.update(Minecraft.getInstance().deltaTracker);
+        dummyCamera.setup(level, sourceEntity, false, false, Minecraft.getInstance().getFrameTime());
         return dummyCamera;
     }
 
@@ -201,7 +199,7 @@ public class EditorState {
     }
 
     public boolean isEntityHidden(Entity entity) {
-        if (this.hideAllSpectators && entity instanceof Player player && player.gameMode() == GameType.SPECTATOR) {
+        if (this.hideAllSpectators && entity instanceof Player player && player.isSpectator()) {
             return true;
         } else {
             return this.hideDuringExport.contains(entity.getUUID());

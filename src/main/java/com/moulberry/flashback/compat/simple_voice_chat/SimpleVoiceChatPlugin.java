@@ -21,6 +21,7 @@ import de.maxhenkel.voicechat.api.internal.events.UpdateCameraPositionEvent;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 
+@de.maxhenkel.voicechat.api.ForgeVoicechatPlugin
 public class SimpleVoiceChatPlugin implements VoicechatPlugin {
 
     public static VoicechatClientApi CLIENT_API;
@@ -59,7 +60,7 @@ public class SimpleVoiceChatPlugin implements VoicechatPlugin {
         if (editorState != null) {
             Camera audioCamera = editorState.getAudioCamera();
             if (audioCamera != null) {
-                event.setCameraPosition(audioCamera.position(), audioCamera.forwardVector(), audioCamera.upVector());
+                event.setCameraPosition(audioCamera.getPosition(), audioCamera.getLookVector(), audioCamera.getUpVector());
             }
         }
     }

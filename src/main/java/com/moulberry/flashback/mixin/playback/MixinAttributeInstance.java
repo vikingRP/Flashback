@@ -1,7 +1,7 @@
 package com.moulberry.flashback.mixin.playback;
 
 import com.moulberry.flashback.Flashback;
-import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
 import org.spongepowered.asm.mixin.Mixin;
@@ -14,7 +14,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class MixinAttributeInstance {
 
     @Shadow
-    public abstract boolean removeModifier(Identifier resourceLocation);
+    public abstract void removeModifier(java.util.UUID uuid);
 
     @Inject(method = "addModifier", at = @At(value = "HEAD"))
     public void addModifier(AttributeModifier attributeModifier, CallbackInfo ci) {
@@ -22,7 +22,7 @@ public abstract class MixinAttributeInstance {
         // Remove the modifier first in order to ensure no exceptions are thrown
         if (Flashback.isInReplay()) {
             try {
-                this.removeModifier(attributeModifier.id());
+                this.removeModifier(attributeModifier.getId());
             } catch (Exception ignored) {}
         }
     }

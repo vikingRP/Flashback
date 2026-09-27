@@ -22,22 +22,20 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.ints.IntList;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLevelEvents;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
-import net.fabricmc.loader.api.FabricLoader;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.level.LevelEvent;
+import com.moulberry.flashback.packet.FlashbackNetworking;
+import net.minecraftforge.fml.ModList;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.core.*;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.Connection;
-import net.minecraft.network.DisconnectionDetails;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.chat.Component;
+import com.moulberry.flashback.io.ReplayBuffer;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketFlow;
-import net.minecraft.network.protocol.common.*;
-import net.minecraft.network.protocol.cookie.ClientboundCookieRequestPacket;
 import net.minecraft.network.protocol.game.*;
-import net.minecraft.network.protocol.ping.ClientboundPongResponsePacket;
+import net.minecraft.network.protocol.game.*;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.resources.ResourceKey;
@@ -45,19 +43,15 @@ import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ThreadedLevelLightEngine;
-import net.minecraft.server.network.CommonListenerCookie;
 import net.minecraft.sounds.SoundEvent;
-import net.minecraft.util.ProblemReporter;
 import net.minecraft.world.Difficulty;
-import net.minecraft.world.clock.ClockNetworkState;
-import net.minecraft.world.clock.WorldClock;
 import net.minecraft.world.effect.MobEffect;
 import net.minecraft.world.effect.MobEffectInstance;
 import net.minecraft.world.entity.*;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.AttributeMap;
 import net.minecraft.world.entity.ai.attributes.AttributeModifier;
-import net.minecraft.world.entity.decoration.painting.Painting;
+import net.minecraft.world.entity.decoration.Painting;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -71,14 +65,13 @@ import net.minecraft.world.level.border.WorldBorder;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.DataLayer;
 import net.minecraft.world.level.chunk.LevelChunk;
-import net.minecraft.world.level.chunk.status.ChunkStatus;
+import net.minecraft.world.level.chunk.ChunkStatus;
 import net.minecraft.world.level.dimension.LevelStem;
 import net.minecraft.world.level.lighting.LevelLightEngine;
 import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
 import net.minecraft.world.level.storage.DerivedLevelData;
 import net.minecraft.world.level.storage.PrimaryLevelData;
 import net.minecraft.world.level.storage.ServerLevelData;
-import net.minecraft.world.level.storage.TagValueInput;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 
@@ -89,8 +82,11 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     private final BlockState FALLBACK_BLOCK_STATE = Blocks.VOID_AIR.defaultBlockState();
     private final ReplayServer replayServer;
     private final Map<UUID, PlayerInfo> playerInfoMap = new HashMap<>();
+    private final Set<UUID> listedPlayers = new HashSet<>();
     private Int2ObjectMap<Entity> pendingEntities = new Int2ObjectOpenHashMap<>();
     private ResourceKey<Level> currentDimension = null;
+    private int registryVersion;
+    private final Map<ResourceKey<Level>, Integer> dimensionRegistryVersions = new HashMap<>();
     public int localPlayerId = -1;
     public LongSet forceSendChunksDueToMovingPistonShenanigans = new LongOpenHashSet();
 
@@ -100,6 +96,24 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
     public void clearDataForPlayingSnapshot() {
         this.playerInfoMap.clear();
+        this.listedPlayers.clear();
+    }
+
+    /** Restore recorded metadata after the server initializes actors during a registry reconnect. */
+    public ClientboundPlayerInfoUpdatePacket recordedPlayerInfo() {
+        var packet = new ClientboundPlayerInfoUpdatePacket(EnumSet.of(
+            ClientboundPlayerInfoUpdatePacket.Action.ADD_PLAYER,
+            ClientboundPlayerInfoUpdatePacket.Action.UPDATE_GAME_MODE,
+            ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LISTED,
+            ClientboundPlayerInfoUpdatePacket.Action.UPDATE_LATENCY,
+            ClientboundPlayerInfoUpdatePacket.Action.UPDATE_DISPLAY_NAME), List.of());
+        packet.entries = this.playerInfoMap.entrySet().stream().map(entry -> {
+            PlayerInfo info = entry.getValue();
+            return new ClientboundPlayerInfoUpdatePacket.Entry(entry.getKey(), info.getProfile(),
+                this.listedPlayers.contains(entry.getKey()), info.getLatency(), info.getGameMode(),
+                info.getTabListDisplayName(), null);
+        }).toList();
+        return packet;
     }
 
     private void forward(Packet<?> packet) {
@@ -113,7 +127,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             this.forward(packet);
         } else {
             ServerChunkCache serverChunkCache = this.level().getChunkSource();
-            serverChunkCache.sendToTrackingPlayers(entity, packet);
+            serverChunkCache.broadcast(entity, packet);
         }
     }
 
@@ -151,7 +165,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
                         if (pendingEntity instanceof LivingEntity pendingLiving) {
                             existingEntity.setYBodyRot(pendingLiving.yBodyRot);
                         }
-                        for (SynchedEntityData.DataItem<?> dataItem : pendingEntity.getEntityData().itemsById) {
+                        for (SynchedEntityData.DataItem<?> dataItem : pendingEntity.getEntityData().itemsById.values()) {
                             existingEntity.getEntityData().set((EntityDataAccessor) dataItem.getAccessor(), dataItem.getValue());
                         }
                         continue;
@@ -166,8 +180,8 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             ((ServerLevelExt) level).flashback$setCanSpawnEntities(true);
             try {
                 level.addFreshEntity(pendingEntity);
-                ChunkPos chunkPos = ChunkPos.containing(pendingEntity.blockPosition());
-                level.getChunkSource().addTicketWithRadius(ReplayServer.ENTITY_LOAD_TICKET, chunkPos, 3);
+                ChunkPos chunkPos = new ChunkPos(pendingEntity.blockPosition());
+                level.getChunkSource().addRegionTicket(ReplayServer.ENTITY_LOAD_TICKET, chunkPos, 3, chunkPos);
             } catch (Exception e) {
                 Flashback.LOGGER.error("Unable to spawn entity", e);
             }
@@ -210,8 +224,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     private ServerPlayer spawnPlayer(ClientboundAddEntityPacket addEntityPacket, GameProfile gameProfile, GameType gameType) {
         this.flushPendingEntities();
 
-        CommonListenerCookie commonListenerCookie = CommonListenerCookie.createInitial(gameProfile, false);
-        ServerPlayer serverPlayer = new FlashbackFakePlayer(this.replayServer, this.level(), commonListenerCookie.gameProfile(), commonListenerCookie.clientInformation()) {
+        ServerPlayer serverPlayer = new FlashbackFakePlayer(this.replayServer, this.level(), gameProfile) {
             @Override
             public boolean isSpectator() {
                 return false;
@@ -241,13 +254,13 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
         Connection connection = new Connection(PacketFlow.SERVERBOUND) {
             @Override
-            public void send(Packet<?> packet, @Nullable ChannelFutureListener channelFutureListener, boolean bl) {
+            public void send(Packet<?> packet, @Nullable net.minecraft.network.PacketSendListener listener) {
             }
         };
         EmbeddedChannel embeddedChannel = new EmbeddedChannel(connection);
         serverPlayer.recreateFromPacket(addEntityPacket);
         try {
-            this.replayServer.getPlayerList().placeNewPlayer(connection, serverPlayer, commonListenerCookie);
+            this.replayServer.getPlayerList().placeNewPlayer(connection, serverPlayer);
         } catch (Exception e) {
             this.replayServer.failedToSpawnPlayerWarning = true;
             Flashback.LOGGER.error("Failed to spawn player", e);
@@ -267,7 +280,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     @Nullable
     private Entity createEntityFromPacket(ClientboundAddEntityPacket packet) {
         EntityType<?> entityType = packet.getType();
-        if (entityType == EntityTypes.PLAYER) {
+        if (entityType == EntityType.PLAYER) {
             PlayerInfo playerInfo = this.playerInfoMap.get(packet.getUUID());
             if (playerInfo == null) {
                 return null;
@@ -276,7 +289,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             this.spawnPlayer(packet, playerInfo.getProfile(), playerInfo.getGameMode());
             return null;
         } else {
-            return entityType.create(this.level(), EntitySpawnReason.LOAD);
+            return entityType.create(this.level());
         }
     }
 
@@ -298,33 +311,8 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     }
 
     @Override
-    public void handleSwingAnimation(ClientboundSwingAnimationPacket packet) {
-        Entity entity = this.getEntityOrPending(packet.entityId());
-        if (!(entity instanceof LivingEntity livingEntity)) {
-            return;
-        }
-
-        livingEntity.swing(packet.hand(), packet.animation(), false);
-    }
-
-    @Override
     public void handleAwardStats(ClientboundAwardStatsPacket clientboundAwardStatsPacket) {
         throw new UnsupportedPacketException(clientboundAwardStatsPacket);
-    }
-
-    @Override
-    public void handleRecipeBookAdd(ClientboundRecipeBookAddPacket clientboundRecipeBookAddPacket) {
-        throw new UnsupportedPacketException(clientboundRecipeBookAddPacket);
-    }
-
-    @Override
-    public void handleRecipeBookRemove(ClientboundRecipeBookRemovePacket clientboundRecipeBookRemovePacket) {
-        throw new UnsupportedPacketException(clientboundRecipeBookRemovePacket);
-    }
-
-    @Override
-    public void handleRecipeBookSettings(ClientboundRecipeBookSettingsPacket clientboundRecipeBookSettingsPacket) {
-        throw new UnsupportedPacketException(clientboundRecipeBookSettingsPacket);
     }
 
     @Override
@@ -341,10 +329,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     public void handleBlockEntityData(ClientboundBlockEntityDataPacket clientboundBlockEntityDataPacket) {
         BlockPos blockPos = clientboundBlockEntityDataPacket.getPos();
         this.level().getBlockEntity(blockPos, clientboundBlockEntityDataPacket.getType()).ifPresent(blockEntity -> {
-            try (ProblemReporter.ScopedCollector scopedCollector = new ProblemReporter.ScopedCollector(blockEntity.problemPath(), Flashback.LOGGER)) {
-                // Update data
-                blockEntity.loadWithComponents(TagValueInput.create(scopedCollector, this.replayServer.registryAccess(), clientboundBlockEntityDataPacket.getTag()));
-            }
+            blockEntity.load(clientboundBlockEntityDataPacket.getTag());
 
             // Sync
             blockEntity.setChanged();
@@ -363,11 +348,11 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
         BlockState blockState = this.level().getBlockState(pos);
 
         if (blockState.getBlock() instanceof PistonBaseBlock) {
-            this.forceSendChunksDueToMovingPistonShenanigans.add(ChunkPos.pack(pos.getX() >> 4, pos.getZ() >> 4));
-            this.forceSendChunksDueToMovingPistonShenanigans.add(ChunkPos.pack((pos.getX() >> 4) + 1, pos.getZ() >> 4));
-            this.forceSendChunksDueToMovingPistonShenanigans.add(ChunkPos.pack(pos.getX() >> 4, (pos.getZ() >> 4) + 1));
-            this.forceSendChunksDueToMovingPistonShenanigans.add(ChunkPos.pack((pos.getX() >> 4) - 1, pos.getZ() >> 4));
-            this.forceSendChunksDueToMovingPistonShenanigans.add(ChunkPos.pack(pos.getX() >> 4, (pos.getZ() >> 4) - 1));
+            this.forceSendChunksDueToMovingPistonShenanigans.add(ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4));
+            this.forceSendChunksDueToMovingPistonShenanigans.add(ChunkPos.asLong((pos.getX() >> 4) + 1, pos.getZ() >> 4));
+            this.forceSendChunksDueToMovingPistonShenanigans.add(ChunkPos.asLong(pos.getX() >> 4, (pos.getZ() >> 4) + 1));
+            this.forceSendChunksDueToMovingPistonShenanigans.add(ChunkPos.asLong((pos.getX() >> 4) - 1, pos.getZ() >> 4));
+            this.forceSendChunksDueToMovingPistonShenanigans.add(ChunkPos.asLong(pos.getX() >> 4, (pos.getZ() >> 4) - 1));
         }
 
         this.replayServer.getPlayerList().broadcastAll(clientboundBlockEventPacket);
@@ -388,17 +373,6 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     @Override
     public void handlePlayerChat(ClientboundPlayerChatPacket clientboundPlayerChatPacket) {
         throw new UnsupportedPacketException(clientboundPlayerChatPacket);
-    }
-
-    @Override
-    public void handleRotatePlayer(ClientboundPlayerRotationPacket clientboundPlayerRotationPacket) {
-        Entity entity = this.level().getEntity(this.localPlayerId);
-        if (!(entity instanceof Player player)) {
-            return;
-        }
-
-        player.setYRot(clientboundPlayerRotationPacket.yRot());
-        player.setXRot(clientboundPlayerRotationPacket.xRot());
     }
 
     @Override
@@ -429,17 +403,12 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             return;
         }
 
-        MapItemSavedData mapItemSavedData = level.getMapData(clientboundMapItemDataPacket.mapId());
+        MapItemSavedData mapItemSavedData = level.getMapData("map_" + clientboundMapItemDataPacket.getMapId());
         if (mapItemSavedData == null) {
-            mapItemSavedData = MapItemSavedData.createForClient(clientboundMapItemDataPacket.scale(), clientboundMapItemDataPacket.locked(), level.dimension());
-            level.setMapData(clientboundMapItemDataPacket.mapId(), mapItemSavedData);
+            mapItemSavedData = MapItemSavedData.createForClient(clientboundMapItemDataPacket.getScale(), clientboundMapItemDataPacket.isLocked(), level.dimension());
+            level.setMapData("map_" + clientboundMapItemDataPacket.getMapId(), mapItemSavedData);
         }
         clientboundMapItemDataPacket.applyToMap(mapItemSavedData);
-    }
-
-    @Override
-    public void handleMinecartAlongTrack(ClientboundMoveMinecartPacket clientboundMoveMinecartPacket) {
-        throw new UnsupportedPacketException(clientboundMoveMinecartPacket);
     }
 
     @Override
@@ -453,7 +422,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     }
 
     @Override
-    public void handleMountScreenOpen(ClientboundMountScreenOpenPacket clientboundMountScreenOpenPacket) {
+    public void handleHorseScreenOpen(ClientboundHorseScreenOpenPacket clientboundMountScreenOpenPacket) {
         throw new UnsupportedPacketException(clientboundMountScreenOpenPacket);
     }
 
@@ -477,7 +446,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             for (ReplayPlayer replayViewer : this.replayServer.getReplayViewers()) {
                 if (Objects.equals(replayViewer.lastFirstPersonDataUUID, player.getUUID())) {
                     replayViewer.lastFirstPersonHotbarItems[slot] = itemStack.copy();
-                    ServerPlayNetworking.send(replayViewer, new FlashbackRemoteSetSlot(player.getId(), slot, itemStack.copy()));
+                    FlashbackNetworking.send(replayViewer, new FlashbackRemoteSetSlot(player.getId(), slot, itemStack.copy()));
                 }
             }
         }
@@ -497,7 +466,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             return;
         }
 
-        if (source instanceof Leashable leashable) {
+        if (source instanceof Mob leashable) {
             if (clientboundSetEntityLinkPacket.getDestId() == 0) {
                 leashable.setLeashedTo(null, true);
             } else {
@@ -509,18 +478,6 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
                 leashable.setLeashedTo(dest, true);
             }
         }
-    }
-
-    @Override
-    public void handleEntityPositionSync(ClientboundEntityPositionSyncPacket clientboundEntityPositionSyncPacket) {
-        Entity entity = this.getEntityOrPending(clientboundEntityPositionSyncPacket.id());
-        if (entity == null) {
-            return;
-        }
-
-        Vec3 position = clientboundEntityPositionSyncPacket.position().endPosition();
-        entity.setPos(position);
-        entity.setOnGround(clientboundEntityPositionSyncPacket.onGround());
     }
 
     @Override
@@ -536,20 +493,14 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
                 continue;
             }
 
-            passenger.startRiding(vehicle, true, false);
+            passenger.startRiding(vehicle, true);
         }
     }
 
     @Override
     public void handleExplosion(ClientboundExplodePacket e) {
-        ClientboundExplodePacket withoutKnockback = new ClientboundExplodePacket(e.center(), e.radius(), e.blockCount(),
-                Optional.empty(), e.explosionParticle(), e.explosionSound(), e.blockParticles(), e.playSound());
+        ClientboundExplodePacket withoutKnockback = new ClientboundExplodePacket(e.getX(), e.getY(), e.getZ(), e.getPower(), e.getToBlow(), Vec3.ZERO);
         forward(withoutKnockback);
-    }
-
-    @Override
-    public void handleAddTransientBlockPacket(ClientboundAddTransientBlockPacket packet) {
-        forward(packet);
     }
 
     @Override
@@ -560,10 +511,10 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
         if (type == ClientboundGameEventPacket.NO_RESPAWN_BLOCK_AVAILABLE) {
             return;
         } else if (type == ClientboundGameEventPacket.START_RAINING) {
-            level.getWeatherData().setRaining(true);
+            level.getLevelData().setRaining(true);
             level.setRainLevel(0.0f);
         } else if (type == ClientboundGameEventPacket.STOP_RAINING) {
-            level.getWeatherData().setRaining(false);
+            level.getLevelData().setRaining(false);
             level.setRainLevel(1.0f);
         } else if (type == ClientboundGameEventPacket.CHANGE_GAME_MODE) {
             return;
@@ -581,10 +532,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             return;
         } else if (type == ClientboundGameEventPacket.IMMEDIATE_RESPAWN) {
             return;
-        } else if (type == ClientboundGameEventPacket.LIMITED_CRAFTING) {
-            return;
-        } else if (type == ClientboundGameEventPacket.LEVEL_CHUNKS_LOAD_START) {
-            return;
+
         }
 
         forward(clientboundGameEventPacket);
@@ -592,24 +540,24 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
     @Override
     public void handleLevelChunkWithLight(ClientboundLevelChunkWithLightPacket levelChunkWithLightPacket) {
-        int x = levelChunkWithLightPacket.x();
-        int z = levelChunkWithLightPacket.z();
+        int x = levelChunkWithLightPacket.getX();
+        int z = levelChunkWithLightPacket.getZ();
 
         LevelLightEngine levelLightEngine = this.level().getChunkSource().getLightEngine();
         LevelChunk chunk = this.level().getChunk(x, z);
 
-        var chunkData = levelChunkWithLightPacket.chunkData();
+        var chunkData = levelChunkWithLightPacket.getChunkData();
 
-        chunk.replaceWithPacketData(x, z, chunkData);
+        chunk.replaceWithPacketData(chunkData.getReadBuffer(), chunkData.getHeightmaps(), chunkData.getBlockEntitiesTagsConsumer(x, z));
 
-        var lightData = levelChunkWithLightPacket.lightData();
-        if (FabricLoader.getInstance().isModLoaded("starlight")) {
+        var lightData = levelChunkWithLightPacket.getLightData();
+        if (ModList.get().isLoaded("starlight")) {
             chunk.setLightCorrect(false);
             try {
                 var blockNibbles = StarLightEngine.getFilledEmptyLight(this.level());
                 var skyNibbles = StarLightEngine.getFilledEmptyLight(this.level());
-                extractStarlightData(levelLightEngine, lightData.blockYMask(), lightData.emptyBlockYMask(), lightData.blockUpdates().iterator(), blockNibbles);
-                extractStarlightData(levelLightEngine, lightData.skyYMask(), lightData.emptySkyYMask(), lightData.skyUpdates().iterator(), skyNibbles);
+                extractStarlightData(levelLightEngine, lightData.getBlockYMask(), lightData.getEmptyBlockYMask(), lightData.getBlockUpdates().iterator(), blockNibbles);
+                extractStarlightData(levelLightEngine, lightData.getSkyYMask(), lightData.getEmptySkyYMask(), lightData.getSkyUpdates().iterator(), skyNibbles);
                 ((ExtendedChunk)chunk).setBlockNibbles(blockNibbles);
                 ((ExtendedChunk)chunk).setSkyNibbles(skyNibbles);
             } catch (Exception e) {
@@ -621,14 +569,14 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
         }
 
         ChunkPos chunkPos = chunk.getPos();
-        ((ServerLevelExt)this.level()).flashback$markChunkAsSendable(chunkPos.pack());
+        ((ServerLevelExt)this.level()).flashback$markChunkAsSendable(chunkPos.toLong());
         for (ServerPlayer serverPlayer : this.replayServer.getReplayViewers()) {
-            if (serverPlayer.getChunkTrackingView().contains(chunkPos)) {
-                serverPlayer.connection.chunkSender.markChunkPendingToSend(chunk);
+            if (this.level().getChunkSource().chunkMap.getPlayers(chunkPos, false).contains(serverPlayer)) {
+                serverPlayer.connection.send(new ClientboundLevelChunkWithLightPacket(chunk, levelLightEngine, null, null));
             }
         }
 
-        chunk.markUnsaved();
+        chunk.setUnsaved(true);
     }
 
     private static void extractStarlightData(LevelLightEngine levelLightEngine, BitSet yMask, BitSet emptyYMask, Iterator<byte[]> iterator, SWMRNibbleArray[] nibbles) {
@@ -645,21 +593,21 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     private void applyLightData(LevelLightEngine levelLightEngine, int x, int z, ClientboundLightUpdatePacketData clientboundLightUpdatePacketData) {
         levelLightEngine.retainData(new ChunkPos(x, z), true);
 
-        BitSet skyYMask = clientboundLightUpdatePacketData.skyYMask();
-        BitSet emptySkyYMask = clientboundLightUpdatePacketData.emptySkyYMask();
-        Iterator<byte[]> iterator = clientboundLightUpdatePacketData.skyUpdates().iterator();
+        BitSet skyYMask = clientboundLightUpdatePacketData.getSkyYMask();
+        BitSet emptySkyYMask = clientboundLightUpdatePacketData.getEmptySkyYMask();
+        Iterator<byte[]> iterator = clientboundLightUpdatePacketData.getSkyUpdates().iterator();
         this.readSectionList(x, z, levelLightEngine, LightLayer.SKY, skyYMask, emptySkyYMask, iterator);
 
-        BitSet blockYMask = clientboundLightUpdatePacketData.blockYMask();
-        BitSet emptyBlockYMask = clientboundLightUpdatePacketData.emptyBlockYMask();
-        Iterator<byte[]> iterator2 = clientboundLightUpdatePacketData.blockUpdates().iterator();
+        BitSet blockYMask = clientboundLightUpdatePacketData.getBlockYMask();
+        BitSet emptyBlockYMask = clientboundLightUpdatePacketData.getEmptyBlockYMask();
+        Iterator<byte[]> iterator2 = clientboundLightUpdatePacketData.getBlockUpdates().iterator();
         this.readSectionList(x, z, levelLightEngine, LightLayer.BLOCK, blockYMask, emptyBlockYMask, iterator2);
 
         ((ThreadedLevelLightEngineExt)levelLightEngine).flashback$submitPost(x, z, () -> {
             // Initialize light
             LevelChunk chunkAccess = this.level().getChunk(x, z);
             chunkAccess.initializeLightSources();
-            boolean isLightCorrect = chunkAccess.getPersistedStatus().isOrAfter(ChunkStatus.LIGHT) && chunkAccess.isLightCorrect();
+            boolean isLightCorrect = chunkAccess.getStatus().isOrAfter(ChunkStatus.LIGHT) && chunkAccess.isLightCorrect();
             ((ThreadedLevelLightEngine)levelLightEngine).initializeLight(chunkAccess, isLightCorrect).thenRun(() -> {
                 // Send light data
                 LevelChunk chunkAccess2 = this.level().getChunk(x, z);
@@ -668,7 +616,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
                 ChunkPos chunkPos = new ChunkPos(x, z);
                 var lightPacket = new ClientboundLightUpdatePacket(chunkPos, levelLightEngine, null, null);
                 for (ServerPlayer serverPlayer : this.replayServer.getReplayViewers()) {
-                    if (serverPlayer.getChunkTrackingView().contains(chunkPos)) {
+                    if (this.level().getChunkSource().chunkMap.getPlayers(chunkPos, false).contains(serverPlayer)) {
                         serverPlayer.connection.send(lightPacket);
                     }
                 }
@@ -691,7 +639,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     public void handleChunksBiomes(ClientboundChunksBiomesPacket clientboundChunksBiomesPacket) {
         List<ChunkAccess> chunks = new ArrayList<>(clientboundChunksBiomesPacket.chunkBiomeData().size());
         for (ClientboundChunksBiomesPacket.ChunkBiomeData chunkBiomeData : clientboundChunksBiomesPacket.chunkBiomeData()) {
-            LevelChunk chunk = this.level().getChunk(chunkBiomeData.pos().x(), chunkBiomeData.pos().z());
+            LevelChunk chunk = this.level().getChunk(chunkBiomeData.pos().x, chunkBiomeData.pos().z);
             chunk.replaceBiomes(chunkBiomeData.getReadBuffer());
             chunks.add(chunk);
         }
@@ -716,6 +664,12 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
     @Override
     public void handleLogin(ClientboundLoginPacket clientboundLoginPacket) {
+        this.replayServer.popAllRemotePacks();
+        this.replayServer.customPacketsInSnapshot.clear();
+        if (this.replayServer.configurationPacketHandler.applyRegistries(clientboundLoginPacket.registryHolder())) {
+            this.registryVersion++;
+            this.replayServer.beginRegistryResync(clientboundLoginPacket);
+        }
         ServerPlayer localPlayer = null;
         boolean recreatePlayer = false;
 
@@ -729,10 +683,10 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
         }
 
         this.localPlayerId = clientboundLoginPacket.playerId();
-        this.ensureWorldCreated(clientboundLoginPacket.commonPlayerSpawnInfo(), recreatePlayer ? null : localPlayer, true);
+        this.ensureWorldCreated(CommonPlayerSpawnInfo.from(clientboundLoginPacket, this.replayServer.registryAccess()), recreatePlayer ? null : localPlayer, true);
 
         // Update special world property
-        CommonPlayerSpawnInfo spawnInfo = clientboundLoginPacket.commonPlayerSpawnInfo();
+        CommonPlayerSpawnInfo spawnInfo = CommonPlayerSpawnInfo.from(clientboundLoginPacket, this.replayServer.registryAccess());
         if (this.replayServer.getWorldData() instanceof PrimaryLevelData primaryLevelData) {
             PrimaryLevelData.SpecialWorldProperty specialWorldProperty;
             if (spawnInfo.isFlat()) {
@@ -746,20 +700,20 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             primaryLevelData.settings = new LevelSettings(
                 primaryLevelData.settings.levelName(),
                 primaryLevelData.settings.gameType(),
-                new LevelSettings.DifficultySettings(Difficulty.NORMAL, clientboundLoginPacket.hardcore(), true),
+                clientboundLoginPacket.hardcore(), Difficulty.NORMAL,
                 true,
-                primaryLevelData.settings.dataConfiguration()
+                primaryLevelData.settings.gameRules(), primaryLevelData.settings.getDataConfiguration()
             );
         }
 
         if (recreatePlayer) {
-            ClientboundAddEntityPacket addEntityPacket = (ClientboundAddEntityPacket) PacketHelper.createAddEntity(localPlayer);
+            ClientboundAddEntityPacket addEntityPacket = PacketHelper.createAddEntity(localPlayer, 0);
             addEntityPacket.id = clientboundLoginPacket.playerId();
             this.spawnPlayer(addEntityPacket, localPlayer.getGameProfile(), localPlayer.gameMode.getGameModeForPlayer());
         }
     }
 
-    public void handleCreateLocalPlayer(RegistryFriendlyByteBuf registryFriendlyByteBuf) {
+    public void handleCreateLocalPlayer(ReplayBuffer registryFriendlyByteBuf) {
         UUID uuid = registryFriendlyByteBuf.readUUID();
         double x = registryFriendlyByteBuf.readDouble();
         double y = registryFriendlyByteBuf.readDouble();
@@ -773,17 +727,15 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             registryFriendlyByteBuf.readDouble()
         );
 
-        ClientboundAddEntityPacket addEntityPacket = new ClientboundAddEntityPacket(this.localPlayerId, uuid, x, y, z, xRot, yRot, EntityTypes.PLAYER, 0, velocity, yHeadRot);
-        GameProfile gameProfile = ByteBufCodecs.GAME_PROFILE.decode(registryFriendlyByteBuf);
+        ClientboundAddEntityPacket addEntityPacket = new ClientboundAddEntityPacket(this.localPlayerId, uuid, x, y, z, xRot, yRot, EntityType.PLAYER, 0, velocity, yHeadRot);
+        GameProfile gameProfile = registryFriendlyByteBuf.readGameProfile();
         GameType gameType = GameType.byId(registryFriendlyByteBuf.readVarInt());
 
         Entity existing = this.localPlayerId == -1 ? null : this.getEntityOrPending(this.localPlayerId);
         if (existing == null) {
             this.spawnPlayer(addEntityPacket, gameProfile, gameType);
         } else {
-            existing.snapTo(x, y, z, yRot, xRot);
-            var interpolation = existing.getInterpolation();
-            if (interpolation != null) interpolation.cancel();
+            existing.moveTo(x, y, z, yRot, xRot);
             existing.setDeltaMovement(velocity);
         }
     }
@@ -800,21 +752,24 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
         ServerLevel oldLevel = this.replayServer.getLevel(dimension);
 
-        // Force recreate level if the DimensionType has changed
-        boolean forceRecreate = oldLevel != null && !oldLevel.dimensionType().equals(commonPlayerSpawnInfo.dimensionType().value());
+        // DimensionType contains IntProviders whose equals may compare identity after decoding.
+        // Registry contents are already compared by their network codec; compare the type key here.
+        boolean forceRecreate = oldLevel != null && (this.dimensionRegistryVersions.getOrDefault(dimension, -1) != this.registryVersion
+            || !Objects.equals(oldLevel.dimensionTypeId(), commonPlayerSpawnInfo.dimensionType().unwrapKey().orElse(null)));
 
         if (oldLevel == null || forceRecreate) {
             ServerLevelData serverLevelData = this.replayServer.worldData.overworldData();
             if (dimension != Level.OVERWORLD) {
                 serverLevelData = new DerivedLevelData(this.replayServer.worldData, serverLevelData);
             }
-            Holder.Reference<Biome> plains = this.replayServer.registryAccess().lookupOrThrow(Registries.BIOME).get(Biomes.PLAINS).get();
+            Holder.Reference<Biome> plains = this.replayServer.registryAccess().registryOrThrow(Registries.BIOME).getHolderOrThrow(Biomes.PLAINS);
             LevelStem levelStem = new LevelStem(commonPlayerSpawnInfo.dimensionType(), new EmptyLevelSource(plains));
             ServerLevel serverLevel = new ServerLevel(this.replayServer, this.replayServer.executor, this.replayServer.storageSource,
-                serverLevelData, dimension, levelStem, false, commonPlayerSpawnInfo.seed(), List.of(), false);
+                serverLevelData, dimension, levelStem, new net.minecraft.server.level.progress.LoggerChunkProgressListener(0), false, commonPlayerSpawnInfo.seed(), List.of(), false, null);
             serverLevel.noSave = true;
-            ServerLevelEvents.LOAD.invoker().onLevelLoad(this.replayServer, serverLevel);
+            MinecraftForge.EVENT_BUS.post(new LevelEvent.Load(serverLevel));
             this.replayServer.levels.put(dimension, serverLevel);
+            this.dimensionRegistryVersions.put(dimension, this.registryVersion);
             this.replayServer.getPlayerList().addWorldborderListener(serverLevel);
 
             if (oldLevel != null) {
@@ -829,13 +784,16 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
         if (newLevel != oldLevel) {
             // Move local player and replay viewer
-            if (localPlayer != null) {
-                localPlayer.teleportTo(newLevel, 0.0, 0.0, 0.0, Set.of(), 0.0f, 0.0f, true);
+            // A snapshot reset discarded the old actor and removed its player info.
+            // ActionCreateLocalPlayer will restore it with the proper login packet order.
+            if (localPlayer != null && !localPlayer.isRemoved()) {
+                localPlayer.teleportTo(newLevel, 0.0, 0.0, 0.0, Set.of(), 0.0f, 0.0f);
             }
             for (ReplayPlayer replayViewer : this.replayServer.getReplayViewers()) {
+                boolean changedDimension = replayViewer.level().dimension() != newLevel.dimension();
                 replayViewer.teleportTo(newLevel, replayViewer.getX(), replayViewer.getY(), replayViewer.getZ(), Set.of(),
-                    replayViewer.getYRot(), replayViewer.getXRot(), true);
-                replayViewer.followLocalPlayerNextTick = true;
+                    replayViewer.getYRot(), replayViewer.getXRot());
+                replayViewer.followLocalPlayerNextTick |= changedDimension;
             }
 
             this.forceSendChunksDueToMovingPistonShenanigans.clear();
@@ -936,10 +894,10 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     @Override
     public void handleParticleEvent(ClientboundLevelParticlesPacket clientboundLevelParticlesPacket) {
         for (ServerPlayer viewer : this.replayServer.getReplayViewers()) {
-            boolean overrideLimiter = clientboundLevelParticlesPacket.overrideLimiter();
-            double x = clientboundLevelParticlesPacket.x();
-            double y = clientboundLevelParticlesPacket.y();
-            double z = clientboundLevelParticlesPacket.z();
+            boolean overrideLimiter = clientboundLevelParticlesPacket.isOverrideLimiter();
+            double x = clientboundLevelParticlesPacket.getX();
+            double y = clientboundLevelParticlesPacket.getY();
+            double z = clientboundLevelParticlesPacket.getZ();
             this.level().sendParticles(viewer, overrideLimiter, x, y, z, clientboundLevelParticlesPacket);
         }
     }
@@ -953,6 +911,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     public void handlePlayerInfoRemove(ClientboundPlayerInfoRemovePacket clientboundPlayerInfoRemovePacket) {
         for (UUID uuid : clientboundPlayerInfoRemovePacket.profileIds()) {
             this.playerInfoMap.remove(uuid);
+            this.listedPlayers.remove(uuid);
         }
         forward(clientboundPlayerInfoRemovePacket);
     }
@@ -977,7 +936,11 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
     private void applyPlayerInfoUpdate(ClientboundPlayerInfoUpdatePacket.Action action, ClientboundPlayerInfoUpdatePacket.Entry entry, PlayerInfo playerInfo) {
         switch (action) {
-            case ADD_PLAYER, INITIALIZE_CHAT, UPDATE_LISTED -> {
+            case ADD_PLAYER, INITIALIZE_CHAT -> {
+            }
+            case UPDATE_LISTED -> {
+                if (entry.listed()) this.listedPlayers.add(entry.profileId());
+                else this.listedPlayers.remove(entry.profileId());
             }
             case UPDATE_GAME_MODE -> {
                 playerInfo.setGameMode(entry.gameMode());
@@ -988,19 +951,14 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             case UPDATE_DISPLAY_NAME -> {
                 playerInfo.setTabListDisplayName(entry.displayName());
             }
-            case UPDATE_LIST_ORDER -> {
-                playerInfo.setTabListOrder(entry.listOrder());
-            }
-            case UPDATE_HAT -> {
-                playerInfo.setShowHat(entry.showHat());
-            }
+
         }
     }
 
     @Override
     public void handleRemoveEntities(ClientboundRemoveEntitiesPacket clientboundRemoveEntitiesPacket) {
         IntList forwardRemoveUnknown = new IntArrayList();
-        clientboundRemoveEntitiesPacket.entityIds().forEach(i -> {
+        clientboundRemoveEntitiesPacket.getEntityIds().forEach(i -> {
             Entity entity = this.level().getEntity(i);
             if (entity == null) {
                 forwardRemoveUnknown.add(i);
@@ -1015,11 +973,11 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
     @Override
     public void handleRemoveMobEffect(ClientboundRemoveMobEffectPacket clientboundRemoveMobEffectPacket) {
-        Entity entity = this.getEntityOrPending(clientboundRemoveMobEffectPacket.entityId());
+        Entity entity = clientboundRemoveMobEffectPacket.getEntity(this.level());
         if (entity == null) {
             forward(clientboundRemoveMobEffectPacket);
         } else if (entity instanceof LivingEntity livingEntity) {
-            livingEntity.removeEffect(clientboundRemoveMobEffectPacket.effect());
+            livingEntity.removeEffect(clientboundRemoveMobEffectPacket.getEffect());
         }
     }
 
@@ -1031,11 +989,11 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             localPlayer = level.getEntity(this.localPlayerId);
         }
 
-        this.ensureWorldCreated(clientboundRespawnPacket.commonPlayerSpawnInfo(), localPlayer, false);
+        this.ensureWorldCreated(CommonPlayerSpawnInfo.from(clientboundRespawnPacket, this.replayServer.registryAccess()), localPlayer, false);
 
         if (localPlayer instanceof ServerPlayer oldServerPlayer) {
             ClientboundAddEntityPacket addEntityPacket = new ClientboundAddEntityPacket(oldServerPlayer.getId(), oldServerPlayer.getUUID(),
-                oldServerPlayer.getX(), oldServerPlayer.getY(), oldServerPlayer.getZ(), oldServerPlayer.getXRot(), oldServerPlayer.getYRot(), EntityTypes.PLAYER,
+                oldServerPlayer.getX(), oldServerPlayer.getY(), oldServerPlayer.getZ(), oldServerPlayer.getXRot(), oldServerPlayer.getYRot(), EntityType.PLAYER,
                 0, Vec3.ZERO, oldServerPlayer.getYHeadRot());
 
             ServerPlayer newServerPlayer = this.spawnPlayer(addEntityPacket, oldServerPlayer.getGameProfile(), oldServerPlayer.gameMode.getGameModeForPlayer());
@@ -1045,8 +1003,8 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
             // Copy over the customization & main hand even if the entity data flag isn't set
             // This should ensure that the skin layers are kept properly when respawning
-            newServerPlayer.getEntityData().set(Avatar.DATA_PLAYER_MODE_CUSTOMISATION, oldServerPlayer.getEntityData().get(Avatar.DATA_PLAYER_MODE_CUSTOMISATION));
-            newServerPlayer.getEntityData().set(Avatar.DATA_PLAYER_MAIN_HAND, oldServerPlayer.getEntityData().get(Avatar.DATA_PLAYER_MAIN_HAND));
+            newServerPlayer.getEntityData().set(Player.DATA_PLAYER_MODE_CUSTOMISATION, oldServerPlayer.getEntityData().get(Player.DATA_PLAYER_MODE_CUSTOMISATION));
+            newServerPlayer.getEntityData().set(Player.DATA_PLAYER_MAIN_HAND, oldServerPlayer.getEntityData().get(Player.DATA_PLAYER_MAIN_HAND));
 
             if (clientboundRespawnPacket.shouldKeep((byte)2)) {
                 newServerPlayer.setShiftKeyDown(oldServerPlayer.isShiftKeyDown());
@@ -1059,9 +1017,9 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             }
 
             if (clientboundRespawnPacket.shouldKeep((byte)1)) {
-                newServerPlayer.getAttributes().assignAllValues(oldServerPlayer.getAttributes());
+                newServerPlayer.getAttributes().assignValues(oldServerPlayer.getAttributes());
             } else {
-                newServerPlayer.getAttributes().assignBaseValues(oldServerPlayer.getAttributes());
+                newServerPlayer.getAttributes().assignValues(oldServerPlayer.getAttributes());
             }
         }
     }
@@ -1082,8 +1040,8 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     }
 
     @Override
-    public void handleSetHeldSlot(ClientboundSetHeldSlotPacket clientboundSetHeldSlotPacket) {
-        if (!Inventory.isHotbarSlot(clientboundSetHeldSlotPacket.slot())) {
+    public void handleSetCarriedItem(ClientboundSetCarriedItemPacket clientboundSetHeldSlotPacket) {
+        if (!Inventory.isHotbarSlot(clientboundSetHeldSlotPacket.getSlot())) {
             return;
         }
 
@@ -1094,16 +1052,16 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
         Inventory inventory = player.getInventory();
 
-        if (inventory.getSelectedSlot() == clientboundSetHeldSlotPacket.slot()) {
+        if (inventory.selected == clientboundSetHeldSlotPacket.getSlot()) {
             return;
         }
 
-        inventory.setSelectedSlot(clientboundSetHeldSlotPacket.slot());
+        inventory.selected = clientboundSetHeldSlotPacket.getSlot();
 
         for (ReplayPlayer replayViewer : this.replayServer.getReplayViewers()) {
             if (Objects.equals(replayViewer.lastFirstPersonDataUUID, player.getUUID())) {
-                replayViewer.lastFirstPersonSelectedSlot = inventory.getSelectedSlot();
-                ServerPlayNetworking.send(replayViewer, new FlashbackRemoteSelectHotbarSlot(player.getId(), inventory.getSelectedSlot()));
+                replayViewer.lastFirstPersonSelectedSlot = inventory.selected;
+                FlashbackNetworking.send(replayViewer, new FlashbackRemoteSelectHotbarSlot(player.getId(), inventory.selected));
             }
         }
     }
@@ -1125,11 +1083,11 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
     @Override
     public void handleSetEntityMotion(ClientboundSetEntityMotionPacket clientboundSetEntityMotionPacket) {
-        Entity entity = this.getEntityOrPending(clientboundSetEntityMotionPacket.id());
+        Entity entity = this.getEntityOrPending(clientboundSetEntityMotionPacket.getId());
         forward(entity, clientboundSetEntityMotionPacket);
 
         if (entity != null) {
-            entity.setDeltaMovement(clientboundSetEntityMotionPacket.movement());
+            entity.setDeltaMovement(new Vec3(clientboundSetEntityMotionPacket.getXa() / 8000.0, clientboundSetEntityMotionPacket.getYa() / 8000.0, clientboundSetEntityMotionPacket.getZa() / 8000.0));
         }
     }
 
@@ -1158,7 +1116,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
                     replayViewer.lastFirstPersonExperienceProgress = player.experienceProgress;
                     replayViewer.lastFirstPersonTotalExperience = player.totalExperience;
                     replayViewer.lastFirstPersonExperienceLevel = player.experienceLevel;
-                    ServerPlayNetworking.send(replayViewer, new FlashbackRemoteExperience(player.getId(), player.experienceProgress,
+                    FlashbackNetworking.send(replayViewer, new FlashbackRemoteExperience(player.getId(), player.experienceProgress,
                         player.totalExperience, player.experienceLevel));
                 }
             }
@@ -1181,7 +1139,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
                 if (Objects.equals(replayViewer.lastFirstPersonDataUUID, player.getUUID())) {
                     replayViewer.lastFirstPersonFoodLevel = food;
                     replayViewer.lastFirstPersonSaturationLevel = saturation;
-                    ServerPlayNetworking.send(replayViewer, new FlashbackRemoteFoodData(player.getId(), food, saturation));
+                    FlashbackNetworking.send(replayViewer, new FlashbackRemoteFoodData(player.getId(), food, saturation));
                 }
             }
         }
@@ -1193,55 +1151,23 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     }
 
     @Override
-    public void handleSetPlayerInventory(ClientboundSetPlayerInventoryPacket clientboundSetPlayerInventoryPacket) {
-        Entity entity = this.level().getEntity(this.localPlayerId);
-        if (entity instanceof Player player) {
-            int slot = clientboundSetPlayerInventoryPacket.slot();
-            ItemStack itemStack = clientboundSetPlayerInventoryPacket.contents();
-            player.getInventory().setItem(slot, itemStack);
-
-            if (slot < 0 || slot > 9) {
-                return;
-            }
-
-            for (ReplayPlayer replayViewer : this.replayServer.getReplayViewers()) {
-                if (Objects.equals(replayViewer.lastFirstPersonDataUUID, player.getUUID())) {
-                    replayViewer.lastFirstPersonHotbarItems[slot] = itemStack.copy();
-                    ServerPlayNetworking.send(replayViewer, new FlashbackRemoteSetSlot(player.getId(), slot, itemStack.copy()));
-                }
-            }
-        }
-    }
-
-    @Override
     public void handleSetScore(ClientboundSetScorePacket clientboundSetScorePacket) {
         forward(clientboundSetScorePacket);
     }
 
     @Override
-    public void handleResetScore(ClientboundResetScorePacket clientboundResetScorePacket) {
-        forward(clientboundResetScorePacket);
+    public void handleSetSpawn(ClientboundSetDefaultSpawnPositionPacket packet) {
+        this.level().setDefaultSpawnPos(packet.getPos(), packet.getAngle());
     }
 
     @Override
-    public void handleSetSpawn(ClientboundSetDefaultSpawnPositionPacket clientboundSetDefaultSpawnPositionPacket) {
-        this.level().setRespawnData(clientboundSetDefaultSpawnPositionPacket.respawnData());
-    }
-
-    @Override
-    public void handleSetTime(ClientboundSetTimePacket clientboundSetTimePacket) {
+    public void handleSetTime(ClientboundSetTimePacket packet) {
         for (ServerLevel level : this.replayServer.getAllLevels()) {
-            for (Map.Entry<Holder<WorldClock>, ClockNetworkState> entry : clientboundSetTimePacket.clockUpdates().entrySet()) {
-                level.clockManager().setTotalTicks(entry.getKey(), entry.getValue().totalTicks());
-                level.clockManager().setPaused(entry.getKey(), entry.getValue().rate() == 0.0f);
-            }
-
-            if (level.getLevelData() instanceof ServerLevelData serverLevelData) {
-                serverLevelData.setGameTime(clientboundSetTimePacket.gameTime());
-            }
+            level.setDayTime(Math.abs(packet.getDayTime()));
+            level.getGameRules().getRule(GameRules.RULE_DAYLIGHT).set(packet.getDayTime() >= 0, this.replayServer);
+            ((ServerLevelData)level.getLevelData()).setGameTime(packet.getGameTime());
         }
-
-        forward(clientboundSetTimePacket);
+        forward(packet);
     }
 
     @Override
@@ -1284,33 +1210,12 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     }
 
     @Override
-    public void handleTeleportEntity(ClientboundTeleportEntityPacket clientboundTeleportEntityPacket) {
-        Entity entity = this.getEntityOrPending(clientboundTeleportEntityPacket.id());
-        if (entity == null) {
-            forward(clientboundTeleportEntityPacket);
-            return;
-        }
-
-        PositionMoveRotation change = clientboundTeleportEntityPacket.change();
-        Set<Relative> relatives = clientboundTeleportEntityPacket.relatives();
-
-        PositionMoveRotation lerpTarget = PositionMoveRotation.of(entity);
-        PositionMoveRotation absolute = PositionMoveRotation.calculateAbsolute(lerpTarget, change, relatives);
-
-        entity.snapTo(absolute.position().x(), absolute.position().y(), absolute.position().z(), absolute.yRot(), absolute.xRot());
-        entity.setDeltaMovement(absolute.deltaMovement());
-        entity.setOnGround(clientboundTeleportEntityPacket.onGround());
+    public void handleTeleportEntity(ClientboundTeleportEntityPacket packet) {
+        Entity entity = this.getEntityOrPending(packet.getId());
+        if (entity == null) { forward(packet); return; }
+        entity.moveTo(packet.getX(), packet.getY(), packet.getZ(), packet.getyRot() * 360.0f / 256, packet.getxRot() * 360.0f / 256);
+        entity.setOnGround(packet.isOnGround());
         entity.setYHeadRot(entity.getYRot());
-    }
-
-    @Override
-    public void handleTickingState(ClientboundTickingStatePacket clientboundTickingStatePacket) {
-        throw new UnsupportedPacketException(clientboundTickingStatePacket);
-    }
-
-    @Override
-    public void handleTickingStep(ClientboundTickingStepPacket clientboundTickingStepPacket) {
-        throw new UnsupportedPacketException(clientboundTickingStepPacket);
     }
 
     @Override
@@ -1323,14 +1228,14 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
         if (entity instanceof LivingEntity livingEntity) {
             AttributeMap attributeMap = livingEntity.getAttributes();
             for (ClientboundUpdateAttributesPacket.AttributeSnapshot snapshot : clientboundUpdateAttributesPacket.getValues()) {
-                AttributeInstance attributeInstance = attributeMap.getInstance(snapshot.attribute());
+                AttributeInstance attributeInstance = attributeMap.getInstance(snapshot.getAttribute());
                 if (attributeInstance == null) {
                     continue;
                 }
 
-                attributeInstance.setBaseValue(snapshot.base());
+                attributeInstance.setBaseValue(snapshot.getBase());
                 attributeInstance.removeModifiers();
-                for (AttributeModifier modifier : snapshot.modifiers()) {
+                for (AttributeModifier modifier : snapshot.getModifiers()) {
                     attributeInstance.addTransientModifier(modifier);
                 }
             }
@@ -1345,12 +1250,9 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
             return;
         }
         if (entity instanceof LivingEntity livingEntity) {
-            Holder<MobEffect> holder = clientboundUpdateMobEffectPacket.getEffect();
+            MobEffect holder = clientboundUpdateMobEffectPacket.getEffect();
             MobEffectInstance mobEffectInstance = new MobEffectInstance(holder, clientboundUpdateMobEffectPacket.getEffectDurationTicks(), clientboundUpdateMobEffectPacket.getEffectAmplifier(),
-                clientboundUpdateMobEffectPacket.isEffectAmbient(), clientboundUpdateMobEffectPacket.isEffectVisible(), clientboundUpdateMobEffectPacket.effectShowsIcon(), null);
-            if (!clientboundUpdateMobEffectPacket.shouldBlend()) {
-                mobEffectInstance.skipBlending();
-            }
+                clientboundUpdateMobEffectPacket.isEffectAmbient(), clientboundUpdateMobEffectPacket.isEffectVisible(), clientboundUpdateMobEffectPacket.effectShowsIcon());
 
             livingEntity.forceAddEffect(mobEffectInstance, null);
         }
@@ -1373,18 +1275,13 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
     @Override
     public void handleChangeDifficulty(ClientboundChangeDifficultyPacket clientboundChangeDifficultyPacket) {
-        this.replayServer.setDifficultyLocked(clientboundChangeDifficultyPacket.locked());
-        this.replayServer.setDifficulty(clientboundChangeDifficultyPacket.difficulty(), true);
+        this.replayServer.setDifficultyLocked(clientboundChangeDifficultyPacket.isLocked());
+        this.replayServer.setDifficulty(clientboundChangeDifficultyPacket.getDifficulty(), true);
     }
 
     @Override
     public void handleSetCamera(ClientboundSetCameraPacket clientboundSetCameraPacket) {
         throw new UnsupportedPacketException(clientboundSetCameraPacket);
-    }
-
-    @Override
-    public void handleSetCursorItem(ClientboundSetCursorItemPacket clientboundSetCursorItemPacket) {
-        throw new UnsupportedPacketException(clientboundSetCursorItemPacket);
     }
 
     @Override
@@ -1394,7 +1291,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
         worldBorder.setCenter(clientboundInitializeBorderPacket.getNewCenterX(), clientboundInitializeBorderPacket.getNewCenterZ());
         long lerpTime = clientboundInitializeBorderPacket.getLerpTime();
         if (lerpTime > 0L) {
-            worldBorder.lerpSizeBetween(clientboundInitializeBorderPacket.getOldSize(), clientboundInitializeBorderPacket.getNewSize(), lerpTime, this.level().getGameTime());
+            worldBorder.lerpSizeBetween(clientboundInitializeBorderPacket.getOldSize(), clientboundInitializeBorderPacket.getNewSize(), lerpTime);
         } else {
             worldBorder.setSize(clientboundInitializeBorderPacket.getNewSize());
         }
@@ -1409,7 +1306,7 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
         long lerpTime = clientboundSetBorderLerpSizePacket.getLerpTime();
         if (lerpTime > 0L) {
-            worldBorder.lerpSizeBetween(clientboundSetBorderLerpSizePacket.getOldSize(), clientboundSetBorderLerpSizePacket.getNewSize(), lerpTime, this.level().getGameTime());
+            worldBorder.lerpSizeBetween(clientboundSetBorderLerpSizePacket.getOldSize(), clientboundSetBorderLerpSizePacket.getNewSize(), lerpTime);
         } else {
             worldBorder.setSize(clientboundSetBorderLerpSizePacket.getNewSize());
         }
@@ -1441,8 +1338,8 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
     @Override
     public void handleTabListCustomisation(ClientboundTabListPacket clientboundTabListPacket) {
-        this.replayServer.setTabListCustomization(clientboundTabListPacket.header(),
-            clientboundTabListPacket.footer());
+        this.replayServer.setTabListCustomization(clientboundTabListPacket.getHeader(),
+            clientboundTabListPacket.getFooter());
     }
 
     @Override
@@ -1461,12 +1358,12 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
         if (player instanceof Player) {
             Entity vehicle = player.getRootVehicle();
             if (vehicle != player) {
-                double x = clientboundMoveVehiclePacket.movingTo().position().x;
-                double y = clientboundMoveVehiclePacket.movingTo().position().y;
-                double z = clientboundMoveVehiclePacket.movingTo().position().z;
-                float yaw = clientboundMoveVehiclePacket.movingTo().yRot();
-                float pitch = clientboundMoveVehiclePacket.movingTo().xRot();
-                vehicle.snapTo(x, y, z, yaw, pitch);
+                double x = clientboundMoveVehiclePacket.getX();
+                double y = clientboundMoveVehiclePacket.getY();
+                double z = clientboundMoveVehiclePacket.getZ();
+                float yaw = clientboundMoveVehiclePacket.getYRot();
+                float pitch = clientboundMoveVehiclePacket.getXRot();
+                vehicle.moveTo(x, y, z, yaw, pitch);
             }
         }
     }
@@ -1524,16 +1421,16 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
 
     @Override
     public void handleLightUpdatePacket(ClientboundLightUpdatePacket clientboundLightUpdatePacket) {
-        int x = clientboundLightUpdatePacket.x();
-        int z = clientboundLightUpdatePacket.z();
+        int x = clientboundLightUpdatePacket.getX();
+        int z = clientboundLightUpdatePacket.getZ();
 
         LevelLightEngine levelLightEngine = this.level().getChunkSource().getLightEngine();
         LevelChunk chunk = this.level().getChunk(x, z);
 
-        var lightData = clientboundLightUpdatePacket.lightData();
+        var lightData = clientboundLightUpdatePacket.getLightData();
         this.applyLightData(levelLightEngine, x, z, lightData);
 
-        chunk.markUnsaved();
+        chunk.setUnsaved(true);
     }
 
     @Override
@@ -1620,32 +1517,6 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     }
 
     @Override
-    public void handleConfigurationStart(ClientboundStartConfigurationPacket clientboundStartConfigurationPacket) {
-        throw new UnsupportedPacketException(clientboundStartConfigurationPacket);
-    }
-
-    @Override
-    public void handleChunkBatchStart(ClientboundChunkBatchStartPacket clientboundChunkBatchStartPacket) {
-        throw new UnsupportedPacketException(clientboundChunkBatchStartPacket);
-    }
-
-    @Override
-    public void handleChunkBatchFinished(ClientboundChunkBatchFinishedPacket clientboundChunkBatchFinishedPacket) {
-        throw new UnsupportedPacketException(clientboundChunkBatchFinishedPacket);
-    }
-
-    @Override
-    public void handleDebugSample(ClientboundDebugSamplePacket clientboundDebugSamplePacket) {
-        throw new UnsupportedPacketException(clientboundDebugSamplePacket);
-    }
-
-    @Override
-    public void handleProjectilePowerPacket(ClientboundProjectilePowerPacket clientboundProjectilePowerPacket) {
-        Entity entity = this.level().getEntity(clientboundProjectilePowerPacket.getId());
-        forward(entity, clientboundProjectilePowerPacket);
-    }
-
-    @Override
     public void handleKeepAlive(ClientboundKeepAlivePacket clientboundKeepAlivePacket) {
         throw new UnsupportedPacketException(clientboundKeepAlivePacket);
     }
@@ -1666,113 +1537,36 @@ public class ReplayGamePacketHandler implements ClientGamePacketListener {
     }
 
     @Override
-    public void handleResourcePackPush(ClientboundResourcePackPushPacket clientboundResourcePackPushPacket) {
-        this.replayServer.pushRemotePack(clientboundResourcePackPushPacket.id(),
-            clientboundResourcePackPushPacket.url(), clientboundResourcePackPushPacket.hash());
+    public void handleUpdateTags(ClientboundUpdateTagsPacket packet) {
+        this.replayServer.configurationPacketHandler.applyTags(packet);
     }
 
     @Override
-    public void handleResourcePackPop(ClientboundResourcePackPopPacket clientboundResourcePackPopPacket) {
-        if (clientboundResourcePackPopPacket.id().isEmpty()) {
-            this.replayServer.popAllRemotePacks();
-        } else {
-            this.replayServer.popRemotePack(clientboundResourcePackPopPacket.id().get());
-        }
+    public void handleEnabledFeatures(ClientboundUpdateEnabledFeaturesPacket packet) {
+        this.replayServer.configurationPacketHandler.applyFeatures(net.minecraft.world.flag.FeatureFlags.REGISTRY.fromNames(packet.features()));
     }
+    @Override
+    public void handleResourcePack(ClientboundResourcePackPacket packet) {
+        this.replayServer.popAllRemotePacks();
+        this.replayServer.pushRemotePack(UUID.nameUUIDFromBytes(packet.getUrl().getBytes(java.nio.charset.StandardCharsets.UTF_8)), packet.getUrl(), packet.getHash());
+    }
+    @Override
+    public void handleAddPlayer(ClientboundAddPlayerPacket packet) {
+        PlayerInfo info = this.playerInfoMap.get(packet.getPlayerId());
+        if (info != null) this.spawnPlayer(new ClientboundAddEntityPacket(packet.getEntityId(), packet.getPlayerId(), packet.getX(), packet.getY(), packet.getZ(),
+            packet.getxRot() * 360.0f / 256, packet.getyRot() * 360.0f / 256, EntityType.PLAYER, 0, Vec3.ZERO, packet.getyRot() * 360.0f / 256), info.getProfile(), info.getGameMode());
+    }
+    @Override
+    public void handleAddExperienceOrb(ClientboundAddExperienceOrbPacket packet) {
+        ExperienceOrb orb = new ExperienceOrb(this.level(), packet.getX(), packet.getY(), packet.getZ(), packet.getValue());
+        orb.setId(packet.getId());
+        this.pendingEntities.put(packet.getId(), orb);
+    }
+    @Override
+    public void handleAddOrRemoveRecipes(ClientboundRecipePacket packet) { throw new UnsupportedPacketException(packet); }
 
     @Override
-    public void handleUpdateTags(ClientboundUpdateTagsPacket clientboundUpdateTagsPacket) {
-        List<Registry.PendingTags<?>> list = new ArrayList<>(clientboundUpdateTagsPacket.tags().size());
-        clientboundUpdateTagsPacket.tags().forEach((resourceKey, networkPayload) -> {
-            var registry = this.replayServer.registryAccess().lookupOrThrow(resourceKey);
-            list.add(registry.prepareTagReload(networkPayload.resolve(registry)));
-        });
-        list.forEach(Registry.PendingTags::apply);
-
-        forward(clientboundUpdateTagsPacket);
-    }
-
-    @Override
-    public void handleStoreCookie(ClientboundStoreCookiePacket clientboundStoreCookiePacket) {
-        throw new UnsupportedPacketException(clientboundStoreCookiePacket);
-    }
-
-    @Override
-    public void handleTransfer(ClientboundTransferPacket clientboundTransferPacket) {
-        throw new UnsupportedPacketException(clientboundTransferPacket);
-    }
-
-    @Override
-    public void handleCustomReportDetails(ClientboundCustomReportDetailsPacket clientboundCustomReportDetailsPacket) {
-        throw new UnsupportedPacketException(clientboundCustomReportDetailsPacket);
-    }
-
-    @Override
-    public void handleServerLinks(ClientboundServerLinksPacket clientboundServerLinksPacket) {
-        throw new UnsupportedPacketException(clientboundServerLinksPacket);
-    }
-
-    @Override
-    public void handleClearDialog(ClientboundClearDialogPacket clientboundClearDialogPacket) {
-    }
-
-    @Override
-    public void handleShowDialog(ClientboundShowDialogPacket clientboundShowDialogPacket) {
-    }
-
-    @Override
-    public void handleRequestCookie(ClientboundCookieRequestPacket clientboundCookieRequestPacket) {
-        throw new UnsupportedPacketException(clientboundCookieRequestPacket);
-    }
-
-    @Override
-    public void handlePongResponse(ClientboundPongResponsePacket clientboundPongResponsePacket) {
-        throw new UnsupportedPacketException(clientboundPongResponsePacket);
-    }
-
-    @Override
-    public void handleTestInstanceBlockStatus(ClientboundTestInstanceBlockStatus clientboundTestInstanceBlockStatus) {
-        throw new UnsupportedPacketException(clientboundTestInstanceBlockStatus);
-    }
-
-    @Override
-    public void handleWaypoint(ClientboundTrackedWaypointPacket clientboundTrackedWaypointPacket) {
-    }
-
-    @Override
-    public void handleDebugChunkValue(ClientboundDebugChunkValuePacket clientboundDebugChunkValuePacket) {
-    }
-
-    @Override
-    public void handleDebugBlockValue(ClientboundDebugBlockValuePacket clientboundDebugBlockValuePacket) {
-    }
-
-    @Override
-    public void handleDebugEntityValue(ClientboundDebugEntityValuePacket clientboundDebugEntityValuePacket) {
-    }
-
-    @Override
-    public void handleDebugEvent(ClientboundDebugEventPacket clientboundDebugEventPacket) {
-    }
-
-    @Override
-    public void handleGameTestHighlightPos(ClientboundGameTestHighlightPosPacket clientboundGameTestHighlightPosPacket) {
-    }
-
-    @Override
-    public void handleGameRuleValues(ClientboundGameRuleValuesPacket packet) {
-    }
-
-    @Override
-    public void handleLowDiskSpaceWarning(ClientboundLowDiskSpaceWarningPacket packet) {
-    }
-
-    @Override
-    public void handlePostEffects(ClientboundPostEffectsPacket packet) {
-    }
-
-    @Override
-    public void onDisconnect(DisconnectionDetails disconnectionDetails) {
+    public void onDisconnect(Component reason) {
     }
 
     @Override

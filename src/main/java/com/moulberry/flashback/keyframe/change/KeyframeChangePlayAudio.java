@@ -21,7 +21,7 @@ public class KeyframeChangePlayAudio implements KeyframeChange {
     public void apply(KeyframeHandler keyframeHandler) {
         Minecraft minecraft = keyframeHandler.getMinecraft();
         if (minecraft != null && minecraft.level != null) {
-            var tickRateManager = minecraft.level.tickRateManager();
+            var tickRateManager = com.moulberry.flashback.playback.ReplayTickRateManager.client();
             float tickrate = tickRateManager.tickrate();
             FlashbackAudioManager.playAt(minecraft.getSoundManager().soundEngine, this.audioBuffer, this.startTick,
                     this.seconds, tickrate / 20f);

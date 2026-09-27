@@ -23,7 +23,7 @@ public class MixinLocalPlayer {
             float volume, float pitch, boolean global, Operation<Void> original) {
         if (Flashback.RECORDER != null && !Flashback.RECORDER.isPaused()) {
 
-            Optional<Holder.Reference<SoundEvent>> builtinSoundEvent = BuiltInRegistries.SOUND_EVENT.get(soundEvent.location());
+            Optional<Holder.Reference<SoundEvent>> builtinSoundEvent = BuiltInRegistries.SOUND_EVENT.getHolder(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.SOUND_EVENT, soundEvent.getLocation()));
             Holder<SoundEvent> holder;
             if (builtinSoundEvent.isEmpty()) {
                 holder = Holder.direct(soundEvent);

@@ -2,16 +2,16 @@ package com.moulberry.flashback.mixin.playback;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
+import com.mojang.blaze3d.vertex.PoseStack;
 import com.moulberry.flashback.Flashback;
-import com.moulberry.flashback.state.EditorState;
+import com.moulberry.flashback.combo_options.ExportProjection;
 import com.moulberry.flashback.state.EditorStateManager;
-import net.minecraft.client.CloudStatus;
+import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.Options;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
-import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.world.level.GameType;
+import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -20,55 +20,72 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-import java.util.Objects;
-
 @Mixin(GameRenderer.class)
 public abstract class MixinGameRenderer {
-    @Shadow
-    @Final
-    Minecraft minecraft;
+    @Shadow @Final private Minecraft minecraft;
+    @Shadow public abstract float getDepthFar();
 
-    @WrapOperation(method = "extractOptions", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Options;getCloudStatus()Lnet/minecraft/client/CloudStatus;"), require = 0)
-    public CloudStatus extractOptions_getCloudStatus(Options instance, Operation<CloudStatus> original) {
-        EditorState editorState = EditorStateManager.getCurrent();
-        if (editorState != null && !editorState.replayVisuals.renderSky) {
-            return CloudStatus.OFF;
-        } else {
-            return original.call(instance);
+    @Inject(method = "getFov", at = @At("HEAD"), cancellable = true)
+    private void flashback$fov(Camera camera, float partialTick, boolean useSetting, CallbackInfoReturnable<Double> cir) {
+        if (!Flashback.isInReplay()) return;
+        if (Flashback.EXPORT_JOB != null && Flashback.EXPORT_JOB.isPanoramic()) {
+            cir.setReturnValue(90.0);
+            return;
+        }
+        var state = EditorStateManager.getCurrent();
+        cir.setReturnValue(state != null && state.replayVisuals.overrideFov
+            ? (double) state.replayVisuals.overrideFovAmount : (double) minecraft.options.fov().get());
+    }
+
+    @Inject(method = "getProjectionMatrix", at = @At("HEAD"), cancellable = true)
+    private void flashback$projection(double fov, CallbackInfoReturnable<Matrix4f> cir) {
+        var job = Flashback.EXPORT_JOB;
+        if (job == null) return;
+        float depth = getDepthFar();
+        if (job.getSettings().projection() == ExportProjection.ORTHOGRAPHIC) {
+            float height = (float)(Math.tan(Math.toRadians(fov / 2)) * depth / 4) / job.getSettings().orthographicZoom();
+            float width = (float)minecraft.getWindow().getWidth() / minecraft.getWindow().getHeight() * height;
+            cir.setReturnValue(new Matrix4f().setOrtho(-width/2, width/2, -height/2, height/2, -depth, depth));
+        } else if (job.isPanoramic()) {
+            cir.setReturnValue(new Matrix4f().setPerspective((float)Math.PI / 2, 1, 0.05f, depth));
         }
     }
 
-    @Inject(method = "render", at = @At(value = "INVOKE", target = "Lcom/mojang/renderpearl/api/commands/CommandEncoder;clearDepthTexture(Lcom/mojang/renderpearl/api/textures/GpuTexture;D)V", remap = false, ordinal = 0), cancellable = true)
-    public void render_noGui(CallbackInfo ci) {
-        if (Flashback.isExporting() && Flashback.EXPORT_JOB.getSettings().noGui()) {
-            ci.cancel();
-        }
+    @Inject(method = {"bobHurt", "bobView"}, at = @At("HEAD"), cancellable = true)
+    private void flashback$panoramicBobbing(PoseStack pose, float partialTick, CallbackInfo ci) {
+        if (Flashback.EXPORT_JOB != null && Flashback.EXPORT_JOB.isPanoramic()) ci.cancel();
+    }
+
+    @Inject(method = "render", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/RenderSystem;clear(IZ)V", ordinal = 0, remap = false), cancellable = true)
+    private void flashback$hideGui(float partialTick, long time, boolean renderLevel, CallbackInfo ci) {
+        if (Flashback.isExporting() && Flashback.EXPORT_JOB.getSettings().noGui()) ci.cancel();
+    }
+
+    @Inject(method = "renderItemInHand", at = @At("HEAD"), cancellable = true)
+    private void flashback$panoramicHands(PoseStack pose, Camera camera, float partialTick, CallbackInfo ci) {
+        if (Flashback.EXPORT_JOB != null && Flashback.EXPORT_JOB.isPanoramic()) ci.cancel();
     }
 
     @WrapOperation(method = "renderItemInHand", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/multiplayer/MultiPlayerGameMode;getPlayerMode()Lnet/minecraft/world/level/GameType;"))
-    public GameType getPlayerMode(MultiPlayerGameMode instance, Operation<GameType> original) {
-        AbstractClientPlayer spectatingPlayer = Flashback.getSpectatingPlayer();
-        if (spectatingPlayer != null) {
-            return Objects.requireNonNullElse(spectatingPlayer.gameMode(), GameType.SURVIVAL);
+    private GameType flashback$spectatingMode(MultiPlayerGameMode mode, Operation<GameType> original) {
+        var player = Flashback.getSpectatingPlayer();
+        if (player != null && minecraft.getConnection() != null) {
+            var info = minecraft.getConnection().getPlayerInfo(player.getUUID());
+            if (info != null) return info.getGameMode();
         }
-        return original.call(instance);
+        return original.call(mode);
     }
 
     @Inject(method = "tryTakeScreenshotIfNeeded", at = @At("HEAD"), cancellable = true)
-    public void tryTakeScreenshotIfNeeded(CallbackInfo ci) {
-        if (Flashback.isInReplay()) {
-            ci.cancel();
-        }
+    private void flashback$noReplayWorldIcon(CallbackInfo ci) {
+        if (Flashback.isInReplay()) ci.cancel();
     }
 
     @Inject(method = "shouldRenderBlockOutline", at = @At("HEAD"), cancellable = true)
-    public void shouldRenderBlockOutline(CallbackInfoReturnable<Boolean> cir) {
+    private void flashback$blockOutline(CallbackInfoReturnable<Boolean> cir) {
         if (Flashback.isInReplay()) {
-            var cameraEntity = Minecraft.getInstance().getCameraEntity();
-            if (cameraEntity == this.minecraft.player && cameraEntity.isSpectator()) {
-                cir.setReturnValue(false);
-            }
+            var camera = minecraft.getCameraEntity();
+            if (camera != null && camera == minecraft.player && camera.isSpectator()) cir.setReturnValue(false);
         }
     }
-
 }

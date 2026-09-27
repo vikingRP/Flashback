@@ -8,22 +8,16 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.player.RemotePlayer;
-import net.minecraft.client.renderer.state.MapRenderState;
-import net.minecraft.client.renderer.state.level.FirstPersonHandsAndItemsRenderState;
-import net.minecraft.core.component.DataComponentType;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.util.Mth;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.HumanoidArm;
 import net.minecraft.world.entity.LivingEntity;
-import net.minecraft.world.entity.vehicle.boat.AbstractBoat;
+import net.minecraft.world.entity.vehicle.Boat;
 import net.minecraft.world.item.CrossbowItem;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.MapItem;
-import net.minecraft.world.level.saveddata.maps.MapId;
-import net.minecraft.world.level.saveddata.maps.MapItemSavedData;
 import net.minecraft.world.phys.Vec3;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -73,20 +67,20 @@ public class MixinRemotePlayer extends AbstractClientPlayer implements RemotePla
     @Inject(method = "aiStep", at = @At("RETURN"))
     public void aiStep(CallbackInfo ci) {
         if (Flashback.isInReplay()) {
-            if (!this.wasSwinging && this.isSwinging()) {
+            if (!this.wasSwinging && this.swinging) {
                 this.resetAttackStrengthTicker();
             }
-            this.wasSwinging = this.isSwinging();
+            this.wasSwinging = this.swinging;
 
             this.xBobO = xBob;
             this.xBob += Mth.wrapDegrees(this.getXRot() - this.xBob) * 0.5f;
             this.yBobO = yBob;
             this.yBob += Mth.wrapDegrees(this.getYRot() - this.yBob) * 0.5f;
 
-            if (this.lastPosition != null && this.avatarState().getInterpolatedWalkDistance(0) == this.avatarState().getInterpolatedWalkDistance(1)) {
+            if (this.lastPosition != null && this.walkDistO == this.walkDist) {
                 double dx = this.lastPosition.x - this.position().x;
                 double dz = this.lastPosition.z - this.position().z;
-                this.addWalkedDistance((float) Math.sqrt(dx*dx + dz*dz) * 0.6f);
+                this.walkDist += (float) Math.sqrt(dx*dx + dz*dz) * 0.6f;
             }
             this.lastPosition = this.position();
 
@@ -104,7 +98,7 @@ public class MixinRemotePlayer extends AbstractClientPlayer implements RemotePla
             }
 
             boolean handsBusy = false;
-            if (this.getControlledVehicle() instanceof AbstractBoat boat) {
+            if (this.getVehicle() instanceof Boat boat) {
                 Vec3 boatPosition = boat.position();
 
                 if (this.lastBoatPosition != null) {
@@ -122,7 +116,7 @@ public class MixinRemotePlayer extends AbstractClientPlayer implements RemotePla
                 this.mainHandHeight = Mth.clamp(this.mainHandHeight - 0.4F, 0.0F, 1.0F);
                 this.offHandHeight = Mth.clamp(this.offHandHeight - 0.4F, 0.0F, 1.0F);
             } else {
-                float attackAnim = this.getItemSwapScale(1.0F);
+                float attackAnim = this.getAttackStrengthScale(1.0F);
                 float mainHandTargetHeight = this.mainHandItem != nextMainHand ? 0.0F : attackAnim * attackAnim * attackAnim;
                 float offHandTargetHeight = this.offHandItem != nextOffHand ? 0.0F : 1.0F;
                 this.mainHandHeight += Mth.clamp(mainHandTargetHeight - this.mainHandHeight, -0.4F, 0.4F);
@@ -140,85 +134,13 @@ public class MixinRemotePlayer extends AbstractClientPlayer implements RemotePla
     }
 
     @Unique
-    private static boolean shouldInstantlyReplaceVisibleItem(final ItemStack currentlyVisibleItem, final ItemStack expectedItem) {
-        if (ItemStack.matchesIgnoringComponents(currentlyVisibleItem, expectedItem, DataComponentType::ignoreSwapAnimation)) {
-            return true;
-        } else {
-            return !Minecraft.getInstance().getItemModelResolver().shouldPlaySwapAnimation(expectedItem);
-        }
+    private static boolean shouldInstantlyReplaceVisibleItem(ItemStack current, ItemStack next) {
+        return ItemStack.matches(current, next) || !net.minecraftforge.client.ForgeHooksClient.shouldCauseReequipAnimation(current, next, -1);
     }
-
-    @Unique
-    private static boolean isChargedCrossbow(final ItemStack item) {
-        return item.is(Items.CROSSBOW) && CrossbowItem.isCharged(item);
-    }
-
-    @Unique
-    private static FirstPersonHandsAndItemsRenderState.HandRenderSelection evaluateWhichHandsToRender(final AbstractClientPlayer player) {
-        ItemStack mainHandItem = player.getMainHandItem();
-        ItemStack offhandItem = player.getOffhandItem();
-        boolean holdsBow = mainHandItem.is(Items.BOW) || offhandItem.is(Items.BOW);
-        boolean holdsCrossbow = mainHandItem.is(Items.CROSSBOW) || offhandItem.is(Items.CROSSBOW);
-        if (!holdsBow && !holdsCrossbow) {
-            return FirstPersonHandsAndItemsRenderState.HandRenderSelection.RENDER_BOTH_HANDS;
-        } else if (!player.isUsingItem()) {
-            return isChargedCrossbow(mainHandItem) ? FirstPersonHandsAndItemsRenderState.HandRenderSelection.RENDER_MAIN_HAND_ONLY : FirstPersonHandsAndItemsRenderState.HandRenderSelection.RENDER_BOTH_HANDS;
-        } else {
-            ItemStack usedItemStack = player.getUseItem();
-            InteractionHand usedHand = player.getUsedItemHand();
-            if (!usedItemStack.is(Items.BOW) && !usedItemStack.is(Items.CROSSBOW)) {
-                return usedHand == InteractionHand.MAIN_HAND && isChargedCrossbow(offhandItem) ? FirstPersonHandsAndItemsRenderState.HandRenderSelection.RENDER_MAIN_HAND_ONLY : FirstPersonHandsAndItemsRenderState.HandRenderSelection.RENDER_BOTH_HANDS;
-            } else {
-                return FirstPersonHandsAndItemsRenderState.HandRenderSelection.onlyForHand(usedHand);
-            }
-        }
-    }
-
-    public void flashback$extractFirstPersonHandsAndItems(float partialTicks, FirstPersonHandsAndItemsRenderState state) {
-        Minecraft minecraft = Minecraft.getInstance();
-
-        LivingEntity.SwingDescription currentSwing = this.getCurrentSwing();
-        state.attackHand = currentSwing == null ? InteractionHand.MAIN_HAND : currentSwing.hand();
-        state.viewXRot = this.getViewXRot(partialTicks);
-        state.viewYRot = this.getViewYRot(partialTicks);
-        state.xBob = Mth.lerp(partialTicks, this.xBobO, this.xBob);
-        state.yBob = Mth.lerp(partialTicks, this.yBobO, this.yBob);
-        state.isScoping = this.isScoping();
-        state.useItemRemainingTicks = this.getUseItemRemainingTicks();
-        state.handRenderSelection = evaluateWhichHandsToRender(this);
-        state.mainHandItem = this.mainHandItem;
-        state.offHandItem = this.offHandItem;
-        state.mainHandHeight = this.mainHandHeight;
-        state.oldMainHandHeight = this.oMainHandHeight;
-        state.offHandHeight = this.offHandHeight;
-        state.oldOffHandHeight = this.oOffHandHeight;
-        boolean isMainHandRight = this.getMainArm() == HumanoidArm.RIGHT;
-        ItemDisplayContext mainHandDisplayContext = isMainHandRight ? ItemDisplayContext.FIRST_PERSON_RIGHT_HAND : ItemDisplayContext.FIRST_PERSON_LEFT_HAND;
-        ItemDisplayContext offHandDisplayContext = isMainHandRight ? ItemDisplayContext.FIRST_PERSON_LEFT_HAND : ItemDisplayContext.FIRST_PERSON_RIGHT_HAND;
-        state.mainHandRenderState.clear();
-        state.offHandRenderState.clear();
-        minecraft.getItemModelResolver().updateForTopItem(state.mainHandRenderState, state.mainHandItem, mainHandDisplayContext, this.level(), this, this.getId() + mainHandDisplayContext.ordinal());
-        minecraft.getItemModelResolver().updateForTopItem(state.offHandRenderState, state.offHandItem, offHandDisplayContext, this.level(), this, this.getId() + offHandDisplayContext.ordinal());
-        state.mainHandUseDuration = state.mainHandItem.getUseDuration(this);
-        state.offHandUseDuration = state.offHandItem.getUseDuration(this);
-        state.mainHandChargeDuration = CrossbowItem.getChargeDuration(state.mainHandItem, this);
-        state.offHandChargeDuration = CrossbowItem.getChargeDuration(state.offHandItem, this);
-        state.mainHandSwapScale = minecraft.getItemModelResolver().swapAnimationScale(state.mainHandItem);
-        state.offHandSwapScale = minecraft.getItemModelResolver().swapAnimationScale(state.offHandItem);
-        state.hasMainHandMapData = extractMapRenderState(minecraft, this, state.mainHandItem, state.mainHandMapRenderState);
-        state.hasOffHandMapData = extractMapRenderState(minecraft, this, state.offHandItem, state.offHandMapRenderState);
-    }
-
-    @Unique
-    private static boolean extractMapRenderState(Minecraft minecraft, final AbstractClientPlayer player, final ItemStack itemStack, final MapRenderState state) {
-        MapId mapId = itemStack.get(DataComponents.MAP_ID);
-        MapItemSavedData mapData = mapId == null ? null : MapItem.getSavedData(mapId, player.level());
-        if (mapId != null && mapData != null) {
-            minecraft.getMapRenderer().extractRenderState(mapId, mapData, state);
-            return true;
-        } else {
-            return false;
-        }
-    }
-
+    @Override public float flashback$getXBob(float tick) { return Mth.lerp(tick, xBobO, xBob); }
+    @Override public float flashback$getYBob(float tick) { return Mth.lerp(tick, yBobO, yBob); }
+    @Override public ItemStack flashback$getMainHand() { return mainHandItem; }
+    @Override public ItemStack flashback$getOffHand() { return offHandItem; }
+    @Override public float flashback$getMainHandHeight(float tick) { return Mth.lerp(tick, oMainHandHeight, mainHandHeight); }
+    @Override public float flashback$getOffHandHeight(float tick) { return Mth.lerp(tick, oOffHandHeight, offHandHeight); }
 }

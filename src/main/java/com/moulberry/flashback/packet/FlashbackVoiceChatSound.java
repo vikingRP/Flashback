@@ -3,19 +3,19 @@ package com.moulberry.flashback.packet;
 import com.moulberry.flashback.Flashback;
 import io.netty.handler.codec.DecoderException;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.moulberry.flashback.packet.PacketCodec;
+import com.moulberry.flashback.packet.FlashbackPayload;
 import net.minecraft.util.ExtraCodecs;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.UUID;
 
-public interface FlashbackVoiceChatSound extends CustomPacketPayload {
+public interface FlashbackVoiceChatSound extends FlashbackPayload {
     Type<FlashbackVoiceChatSound> TYPE = new Type<>(Flashback.createIdentifier("voice_chat_sound"));
-    StreamCodec<FriendlyByteBuf, FlashbackVoiceChatSound> STREAM_CODEC = new FlashbackVoiceChatSoundStreamCodec();
+    PacketCodec<FriendlyByteBuf, FlashbackVoiceChatSound> STREAM_CODEC = new FlashbackVoiceChatSoundPacketCodec();
 
     @Override
-    default Type<? extends CustomPacketPayload> type() {
+    default Type<? extends FlashbackPayload> type() {
         return TYPE;
     }
 
@@ -54,7 +54,7 @@ public interface FlashbackVoiceChatSound extends CustomPacketPayload {
         }
     }
 
-    class FlashbackVoiceChatSoundStreamCodec implements StreamCodec<FriendlyByteBuf, FlashbackVoiceChatSound> {
+    class FlashbackVoiceChatSoundPacketCodec implements PacketCodec<FriendlyByteBuf, FlashbackVoiceChatSound> {
         @Override
         public FlashbackVoiceChatSound decode(FriendlyByteBuf friendlyByteBuf) {
             UUID uuid = friendlyByteBuf.readUUID();

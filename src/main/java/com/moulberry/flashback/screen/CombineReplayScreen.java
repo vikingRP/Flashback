@@ -5,8 +5,7 @@ import com.moulberry.flashback.Flashback;
 import com.moulberry.flashback.io.ReplayCombiner;
 import com.moulberry.flashback.playback.EmptyLevelSource;
 import com.moulberry.flashback.utils.AsyncFileDialogs;
-import net.minecraft.server.permissions.PermissionSet;
-import net.minecraft.util.Util;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
@@ -15,6 +14,7 @@ import net.minecraft.client.gui.layouts.FrameLayout;
 import net.minecraft.client.gui.layouts.GridLayout;
 import net.minecraft.client.gui.screens.AlertScreen;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.TitleScreen;
 import net.minecraft.commands.Commands;
 import net.minecraft.core.Holder;
@@ -41,7 +41,6 @@ import net.minecraft.world.level.dimension.LevelStem;
 import net.minecraft.world.level.levelgen.WorldDimensions;
 import net.minecraft.world.level.levelgen.WorldGenSettings;
 import net.minecraft.world.level.levelgen.WorldOptions;
-import net.minecraft.world.level.storage.LevelDataAndDimensions;
 import net.minecraft.world.level.storage.PrimaryLevelData;
 import org.jetbrains.annotations.Nullable;
 
@@ -72,9 +71,6 @@ public class CombineReplayScreen extends Screen {
         this.output = output;
     }
 
-    @Override
-    protected void setInitialFocus() {
-    }
 
     @Override
     protected void init() {
@@ -145,43 +141,42 @@ public class CombineReplayScreen extends Screen {
 
         rowHelper.addChild(Button.builder(Component.translatable("flashback.combine_replay.do_combine"), button -> {
             try {
-                PackRepository packRepository = ServerPacksSource.createVanillaTrustedRepository();
+                PackRepository packRepository = new PackRepository(new ServerPacksSource());
                 packRepository.reload();
 
                 WorldDataConfiguration worldDataConfiguration = new WorldDataConfiguration(new DataPackConfig(List.of(), List.of()), FeatureFlags.DEFAULT_FLAGS);
                 LevelSettings levelSettings = new LevelSettings("Replay", GameType.SPECTATOR,
-                    new LevelSettings.DifficultySettings(Difficulty.NORMAL, false, true), true, worldDataConfiguration);
+                    false, Difficulty.NORMAL, true, Flashback.createReplayGameRules(FeatureFlags.DEFAULT_FLAGS), worldDataConfiguration);
                 WorldLoader.PackConfig packConfig = new WorldLoader.PackConfig(packRepository, worldDataConfiguration, false, true);
-                WorldLoader.InitConfig initConfig = new WorldLoader.InitConfig(packConfig, Commands.CommandSelection.DEDICATED, PermissionSet.ALL_PERMISSIONS);
+                WorldLoader.InitConfig initConfig = new WorldLoader.InitConfig(packConfig, Commands.CommandSelection.DEDICATED, 4);
 
                 WorldStem worldStem = Util.blockUntilDone(executor -> WorldLoader.load(initConfig, dataLoadContext -> {
                     Registry<LevelStem> registry = new MappedRegistry<>(Registries.LEVEL_STEM, Lifecycle.stable()).freeze();
 
-                    Holder.Reference<Biome> plains = dataLoadContext.datapackWorldRegistries().lookupOrThrow(Registries.BIOME).get(Biomes.PLAINS).get();
-                    Holder.Reference<DimensionType> overworld = dataLoadContext.datapackWorldRegistries().lookupOrThrow(Registries.DIMENSION_TYPE).get(BuiltinDimensionTypes.OVERWORLD).get();
+                    Holder.Reference<Biome> plains = dataLoadContext.datapackWorldgen().registryOrThrow(Registries.BIOME).getHolderOrThrow(Biomes.PLAINS);
+                    Holder.Reference<DimensionType> overworld = dataLoadContext.datapackWorldgen().registryOrThrow(Registries.DIMENSION_TYPE).getHolderOrThrow(BuiltinDimensionTypes.OVERWORLD);
 
-                    WorldDimensions worldDimensions = new WorldDimensions(Map.of(LevelStem.OVERWORLD, new LevelStem(overworld, new EmptyLevelSource(plains))));
+                    MappedRegistry<LevelStem> dimensions = new MappedRegistry<>(Registries.LEVEL_STEM, Lifecycle.stable());
+                    dimensions.register(LevelStem.OVERWORLD, new LevelStem(overworld, new EmptyLevelSource(plains)), Lifecycle.stable());
+                    WorldDimensions worldDimensions = new WorldDimensions(dimensions.freeze());
                     WorldDimensions.Complete complete = worldDimensions.bake(registry);
 
-                    return new WorldLoader.DataLoadOutput<>(new LevelDataAndDimensions.WorldDataAndGenSettings(
-                        new PrimaryLevelData(levelSettings, complete.specialWorldProperty(), complete.lifecycle()),
-                        new WorldGenSettings(new WorldOptions(0L, false, false), worldDimensions)
-                    ), complete.dimensionsRegistryAccess());
+                    return new WorldLoader.DataLoadOutput<>(new PrimaryLevelData(levelSettings, new WorldOptions(0L, false, false), complete.specialWorldProperty(), complete.lifecycle()), complete.dimensionsRegistryAccess());
                 }, WorldStem::new, Util.backgroundExecutor(), executor)).get();
 
                 ReplayCombiner.combine(worldStem.registries().compositeAccess(), this.newReplayName, this.firstReplay, this.secondReplay, this.output);
-                Minecraft.getInstance().gui.setScreen(new TitleScreen());
+                Minecraft.getInstance().setScreen(new TitleScreen());
 
                 worldStem.close();
             } catch (Exception e) {
                 Flashback.LOGGER.error("Error combining replays", e);
-                Minecraft.getInstance().gui.setScreen(new AlertScreen(() -> Minecraft.getInstance().gui.setScreen(this.lastScreen),
+                Minecraft.getInstance().setScreen(new AlertScreen(() -> Minecraft.getInstance().setScreen(this.lastScreen),
                     Component.translatable("flashback.combine_replay.error"), Component.literal(e.getMessage())));
             }
 
         }).width(98).build(), 1);
         rowHelper.addChild(Button.builder(CommonComponents.GUI_CANCEL, button -> {
-            Minecraft.getInstance().gui.setScreen(this.lastScreen);
+            Minecraft.getInstance().setScreen(this.lastScreen);
         }).width(98).build(), 1);
 
         gridLayout.arrangeElements();
@@ -193,6 +188,11 @@ public class CombineReplayScreen extends Screen {
 
     @Override
     public void onClose() {
-        this.minecraft.gui.setScreen(this.lastScreen);
+        this.minecraft.setScreen(this.lastScreen);
+    }
+    @Override
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+        this.renderBackground(graphics);
+        super.render(graphics, mouseX, mouseY, partialTick);
     }
 }

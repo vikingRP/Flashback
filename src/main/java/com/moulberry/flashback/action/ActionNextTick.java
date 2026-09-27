@@ -2,23 +2,23 @@ package com.moulberry.flashback.action;
 
 import com.moulberry.flashback.Flashback;
 import com.moulberry.flashback.playback.ReplayServer;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.resources.Identifier;
+import com.moulberry.flashback.io.ReplayBuffer;
+import net.minecraft.resources.ResourceLocation;
 
 public class ActionNextTick implements Action {
 
-    private static final Identifier NAME = Flashback.createIdentifier("action/next_tick");
+    private static final ResourceLocation NAME = Flashback.createIdentifier("action/next_tick");
     public static final ActionNextTick INSTANCE = new ActionNextTick();
     private ActionNextTick() {
     }
 
     @Override
-    public Identifier name() {
+    public ResourceLocation name() {
         return NAME;
     }
 
     @Override
-    public void handle(ReplayServer replayServer, RegistryFriendlyByteBuf friendlyByteBuf) {
+    public void handle(ReplayServer replayServer, ReplayBuffer friendlyByteBuf) {
         replayServer.handleNextTick();
     }
 

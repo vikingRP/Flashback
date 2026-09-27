@@ -18,7 +18,7 @@ import java.util.SortedSet;
 
 @IfModLoaded(value = "sodium", aliases = "embeddium")
 @Pseudo
-@Mixin(targets = {"net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer", "me.jellysquid.mods.sodium.client.render.SodiumWorldRenderer"})
+@Mixin(targets = {"net.caffeinemc.mods.sodium.client.render.SodiumWorldRenderer", "me.jellysquid.mods.sodium.client.render.SodiumWorldRenderer"}, remap = false)
 public class MixinSodiumWorldRenderer {
 
     @Inject(method = "renderBlockEntities", at = @At("HEAD"), cancellable = true, require = 0, remap = false)

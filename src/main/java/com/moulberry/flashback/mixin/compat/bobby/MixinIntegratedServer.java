@@ -3,12 +3,12 @@ package com.moulberry.flashback.mixin.compat.bobby;
 import com.bawnorton.mixinsquared.TargetHandler;
 import com.moulberry.flashback.Flashback;
 import com.moulberry.mixinconstraints.annotations.IfModLoaded;
-import de.johni0702.minecraft.bobby.BobbyConfig;
 import net.minecraft.client.server.IntegratedServer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Pseudo;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.Coerce;
 
 @IfModLoaded("bobby")
 @Pseudo
@@ -22,13 +22,18 @@ public class MixinIntegratedServer {
             method = "@MixinSquared:Handler",
             at = @At(
                     value = "INVOKE",
-                    target = "Lde/johni0702/minecraft/bobby/BobbyConfig;getViewDistanceOverwrite()I"
+                    target = "Lde/johni0702/minecraft/bobby/BobbyConfig;getViewDistanceOverwrite()I",
+                    remap = false
             )
     )
-    public int flashback$overrideViewDistanceOverwrite(BobbyConfig instance) {
+    public int flashback$overrideViewDistanceOverwrite(@Coerce Object instance) {
         if (Flashback.isInReplay()) {
             return 0;//we dont want server distance override
         }
-        return instance.getViewDistanceOverwrite();
+        try {
+            return (Integer) instance.getClass().getMethod("getViewDistanceOverwrite").invoke(instance);
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Bobby configuration is incompatible with Flashback", e);
+        }
     }
 }

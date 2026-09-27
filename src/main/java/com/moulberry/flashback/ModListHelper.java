@@ -1,7 +1,7 @@
 package com.moulberry.flashback;
 
-import net.fabricmc.loader.api.FabricLoader;
-import net.fabricmc.loader.api.ModContainer;
+import com.moulberry.flashback.platform.ForgePlatform;
+import net.minecraftforge.fml.ModList;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -29,14 +29,8 @@ public class ModListHelper {
     public static LinkedHashMap<String, String> calculateModList() {
         LinkedHashMap<String, String> map = new LinkedHashMap<>();
 
-        for (ModContainer container : FabricLoader.getInstance().getAllMods()) {
-            if (container.getContainingMod().isPresent()) {
-                // Ignore children, tracking the parent should be sufficient
-                continue;
-            }
-
-            var modMetadata = container.getMetadata();
-            map.put(modMetadata.getId(), modMetadata.getVersion().getFriendlyString());
+        for (var mod : ModList.get().getMods()) {
+            map.put(mod.getModId(), mod.getVersion().toString());
         }
 
         return map;

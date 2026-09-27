@@ -1,184 +1,215 @@
 buildscript {
-    repositories {
-        mavenCentral()
-        gradlePluginPortal()
-        maven { url 'https://jitpack.io' }
-        maven { url "https://plugins.gradle.org/m2/" }
-    }
-    dependencies {
-        classpath("com.gradleup.shadow:com.gradleup.shadow.gradle.plugin:9.3.0")
-    }
+    repositories { maven { url = 'https://repo.spongepowered.org/repository/maven-public/' } }
+    dependencies { classpath 'org.spongepowered:mixingradle:0.7.38' }
 }
-
 plugins {
-    id 'net.fabricmc.fabric-loom' version '1.15-SNAPSHOT'
-    id 'com.gradleup.shadow' version "9.3.0"
+    id 'java'
+    id 'idea'
+    id 'net.minecraftforge.gradle' version '6.0.54'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
     id 'maven-publish'
 }
+apply plugin: 'org.spongepowered.mixin'
 
 version = project.mod_version
 group = project.maven_group
-
-base {
-    archivesName = project.archives_base_name
-}
-
-repositories {
-    maven {
-        url = "https://pkgs.dev.azure.com/djtheredstoner/DevAuth/_packaging/public/maven/v1"
-        content {
-            includeGroup("me.djtheredstoner")
-        }
-    }
-    maven {
-        url 'https://api.modrinth.com/maven'
-        content {
-            includeGroup("maven.modrinth")
-        }
-    }
-    maven {
-        url = "https://maven.bawnorton.com/releases"
-        content {
-            includeGroup("com.github.bawnorton.mixinsquared")
-        }
-    }
-    mavenLocal()
-}
-
-loom {
-    accessWidenerPath = file("src/main/resources/flashback.accesswidener")
-}
-
-dependencies {
-    // Minecraft and fabric
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
-    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-
-    // Login in dev environment
-    runtimeOnly("me.djtheredstoner:DevAuth-fabric:1.1.2")
-    runtimeOnly("org.apache.httpcomponents:httpclient:4.5.14")
-    runtimeOnly("org.apache.httpcomponents:httpcore:4.4.16")
-
-    // MixinConstraints
-    include(implementation("com.moulberry:mixinconstraints:1.0.8"))
-
-    // MixinSquared
-    include(implementation(annotationProcessor("com.github.bawnorton.mixinsquared:mixinsquared-fabric:0.3.7-beta.1")))
-
-    // Lattice (config)
-    include(implementation("com.moulberry:lattice:2.2.0"))
-
-    // Apache stuff
-    include(implementation("org.apache.commons:commons-math3:3.6.1"))
-
-    // Mod compatibility
-    compileOnly("maven.modrinth:distanthorizons:Mt9bDAs6")
-    compileOnly("maven.modrinth:sodium:Amr4VcZo")
-    compileOnly("maven.modrinth:iris:MwcLS51S")
-    compileOnly("maven.modrinth:bobby:8gsFUovP")
-    compileOnly("maven.modrinth:simple-voice-chat:OLnMVWXy")
-    compileOnly("maven.modrinth:modmenu:jvjwXH6l")
-    compileOnly("maven.modrinth:scalablelux:gYbHVCz8")
-
-    // FFmpeg
-    shadow(implementation("org.bytedeco:javacv-platform:1.5.14") {
-        exclude group: "org.bytedeco", module: "artoolkitplus"
-        exclude group: "org.bytedeco", module: "artoolkitplus-platform"
-        exclude group: "org.bytedeco", module: "flycapture"
-        exclude group: "org.bytedeco", module: "flycapture-platform"
-        exclude group: "org.bytedeco", module: "leptonica"
-        exclude group: "org.bytedeco", module: "leptonica-platform"
-        exclude group: "org.bytedeco", module: "libdc1394"
-        exclude group: "org.bytedeco", module: "libdc1394-platform"
-        exclude group: "org.bytedeco", module: "libfreenect"
-        exclude group: "org.bytedeco", module: "libfreenect-platform"
-        exclude group: "org.bytedeco", module: "libfreenect2"
-        exclude group: "org.bytedeco", module: "libfreenect2-platform"
-        exclude group: "org.bytedeco", module: "librealsense2"
-        exclude group: "org.bytedeco", module: "librealsense2-platform"
-        exclude group: "org.bytedeco", module: "librealsense"
-        exclude group: "org.bytedeco", module: "librealsense-platform"
-        exclude group: "org.bytedeco", module: "openblas"
-        exclude group: "org.bytedeco", module: "openblas-platform"
-        exclude group: "org.bytedeco", module: "opencv"
-        exclude group: "org.bytedeco", module: "opencv-platform"
-        exclude group: "org.bytedeco", module: "tesseract"
-        exclude group: "org.bytedeco", module: "tesseract-platform"
-        exclude group: "org.bytedeco", module: "videoinput"
-        exclude group: "org.bytedeco", module: "videoinput-platform"
-        exclude group: "org.bytedeco", module: "ffmpeg"
-        exclude group: "org.bytedeco", module: "javacpp"
-    })
-    // Include bytedeco ffmpeg & natives
-    shadow(implementation(group: "org.bytedeco", name: "ffmpeg", version: "8.1.2-1.5.14", classifier: ""))
-    shadow(api(rootProject.files('ffmpeg/ffmpeg-natives-linux.jar'))) // Custom natives are from https://github.com/BtbN/FFmpeg-Builds/
-    shadow(api(rootProject.files('ffmpeg/ffmpeg-natives-windows.jar')))
-    shadow(implementation(group: "org.bytedeco", name: "ffmpeg", version: "8.1.2-1.5.14", classifier: "macosx-x86_64"))
-    shadow(implementation(group: "org.bytedeco", name: "ffmpeg", version: "8.1.2-1.5.14", classifier: "macosx-arm64"))
-    // Include only platforms we use
-    shadow(implementation(group: "org.bytedeco", name: "javacpp", version: "1.5.14", classifier: "linux-x86_64"))
-    shadow(implementation(group: "org.bytedeco", name: "javacpp", version: "1.5.14", classifier: "windows-x86_64"))
-    shadow(implementation(group: "org.bytedeco", name: "javacpp", version: "1.5.14", classifier: "macosx-x86_64"))
-    shadow(implementation(group: "org.bytedeco", name: "javacpp", version: "1.5.14", classifier: "macosx-arm64"))
-
-    // ImGui
-    shadow(implementation(rootProject.files('deps/imgui-binding-1.90.0.jar')))
-    shadow(api(rootProject.files('deps/imgui-natives.jar')))
-}
-
-processResources {
-    inputs.property "version", project.version
-
-    filesMatching("fabric.mod.json") {
-        expand "version": project.version
-    }
-}
-
-tasks.withType(JavaCompile).configureEach {
-    it.options.release = 25
-}
-
+base { archivesName = project.archives_base_name }
 java {
-    // Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
-    // if it is present.
-    // If you remove this line, sources will not be generated.
+    toolchain.languageVersion = JavaLanguageVersion.of(17)
     withSourcesJar()
-
-    toolchain.languageVersion.set(JavaLanguageVersion.of(25))
-    sourceCompatibility = JavaVersion.VERSION_25
-    targetCompatibility = JavaVersion.VERSION_25
 }
+configurations {
+    embedded
+    nestedMods
+    implementation.extendsFrom embedded, nestedMods
+}
+// Optional integration assertions run inside Forge's transformed classloader.
+// Kept outside main so they cannot enter a distributable mod jar.
+if (project.hasProperty('replaySmoke')) {
+    sourceSets.create('replaySmoke') {
+        java.srcDir 'tools/replay-protocol-smoke'
+        java.include 'ReplayRegistrySelfTest.java'
+        compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+        runtimeClasspath += sourceSets.main.output + sourceSets.main.runtimeClasspath
+    }
+}
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.bawnorton.com/releases' }
+    maven {
+        url = 'https://api.modrinth.com/maven'
+        content { includeGroup 'maven.modrinth' }
+    }
+    maven { url = 'https://maven.maxhenkel.de/repository/public' }
+}
+minecraft {
+    mappings channel: mapping_channel, version: mapping_version
+    accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
+    copyIdeResources = true
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.console.level', 'debug'
+            property 'mixin.env.remapRefMap', 'true'
+            property 'mixin.env.refMapRemappingFile', "${buildDir}/createSrgToMcp/output.srg"
+            lazyToken('minecraft_classpath') {
+                tasks.named('embeddedRuntime').get().archiveFile.get().asFile.absolutePath
+            }
+            mods { flashback { source sourceSets.main } }
+        }
+        client {
+            if (project.hasProperty('replaySmoke')) {
+                mods { flashback { source sourceSets.replaySmoke } }
+            }
+        }
+        server { args '--nogui' }
+    }
+}
+mixin {
+    add sourceSets.main, 'flashback.refmap.json'
+    config 'flashback.mixins.json'
+    config 'lattice1201.mixins.json'
+}
+jarJar.enable()
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+    compileOnly 'org.jetbrains:annotations:24.1.0'
+    embedded('com.moulberry:mixinconstraints:1.0.8') { transitive = false }
+    nestedMods jarJar('com.github.bawnorton.mixinsquared:mixinsquared-forge:0.3.7-beta.1') {
+        jarJar.ranged(it, '[0.3.7-beta.1,0.4)')
+    }
+    compileOnly 'com.github.bawnorton.mixinsquared:mixinsquared-common:0.3.7-beta.1'
+    annotationProcessor 'com.github.bawnorton.mixinsquared:mixinsquared-common:0.3.7-beta.1'
+    nestedMods jarJar('io.github.llamalad7:mixinextras-forge:0.5.0') {
+        jarJar.ranged(it, '[0.5.0,0.6)')
+    }
+    compileOnly 'io.github.llamalad7:mixinextras-common:0.5.0'
+    annotationProcessor 'io.github.llamalad7:mixinextras-common:0.5.0'
+    embedded 'org.apache.commons:commons-math3:3.6.1'
+    compileOnly fg.deobf('maven.modrinth:embeddium:0.3.31+mc1.20.1')
+    compileOnly fg.deobf('maven.modrinth:oculus:1.20.1-1.8.0')
+    compileOnly fg.deobf('maven.modrinth:simple-voice-chat:forge-1.20.1-2.6.24')
+    compileOnly fg.deobf('maven.modrinth:distanthorizons:3.3.2-1.20.1')
+    compileOnly fg.deobf('maven.modrinth:starlight-forge:cNa0vkNj')
 
+    // Keep JavaCV matched to the custom FFmpeg 8.1.2 native binaries.
+    embedded('org.bytedeco:javacv:1.5.14') { transitive = false }
+    embedded 'org.bytedeco:javacpp:1.5.14'
+    embedded 'org.bytedeco:ffmpeg:8.1.2-1.5.14'
+    embedded files('ffmpeg/ffmpeg-natives-linux.jar', 'ffmpeg/ffmpeg-natives-windows.jar')
+    ['macosx-x86_64', 'macosx-arm64'].each { platform ->
+        embedded "org.bytedeco:ffmpeg:8.1.2-1.5.14:${platform}"
+    }
+    ['linux-x86_64', 'windows-x86_64', 'macosx-x86_64', 'macosx-arm64'].each { platform ->
+        embedded "org.bytedeco:javacpp:1.5.14:${platform}"
+    }
+    embedded files('deps/imgui-binding-1.90.0.jar', 'deps/imgui-natives.jar')
+    // Minecraft provides LWJGL core 3.3.1. Bundle only NFD and its native binaries.
+    embedded('org.lwjgl:lwjgl-nfd:3.3.3') { transitive = false }
+    ['natives-linux', 'natives-windows', 'natives-macos', 'natives-macos-arm64'].each { platform ->
+        embedded("org.lwjgl:lwjgl-nfd:3.3.3:${platform}") { transitive = false }
+    }
+}
+processResources {
+    def properties = [version: project.version,
+                      minecraft_version_range: minecraft_version_range,
+                      forge_version_range: forge_version_range,
+                      loader_version_range: loader_version_range]
+    inputs.properties properties
+    filesMatching('META-INF/mods.toml') { expand properties }
+    exclude 'fabric.mod.json', 'flashback.accesswidener'
+}
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+    options.compilerArgs += ['-Xmaxerrs', '3000']
+}
+tasks.withType(Jar).configureEach {
+    eachFile { entry ->
+        // The exploded development copy may precede this compilation. Package only
+        // MixinGradle's freshly generated AP output, never the dev resource copy.
+        if (entry.path == 'flashback.refmap.json' &&
+                entry.file.absolutePath == project.layout.buildDirectory.file('resources/main/flashback.refmap.json').get().asFile.absolutePath) {
+            entry.exclude()
+        }
+    }
+}
 jar {
-    from("LICENSE") {
-        rename { "${it}_${project.base.archivesName.get()}"}
-    }
+    archiveClassifier = 'slim'
+    manifest.attributes('MixinConfigs': 'flashback.mixins.json,lattice1201.mixins.json',
+                        'Specification-Title': 'Flashback',
+                        'Implementation-Version': project.version)
+    from('LICENSE.md')
 }
-
-
+tasks.named('jarJar') { archiveClassifier = 'jij' }
 shadowJar {
-    configurations = [project.configurations.shadow]
-    archiveBaseName = "flashback"
-    destinationDirectory = file("${buildDir}/tmp/allJar")
-
-    exclude("LICENSE")
-    exclude("LICENSE.txt")
-}
-
-// Super hacky... merge the shadowJar with the main jar.
-// This is needed because the main jar has the includes
-// Couldn't find a better way of doing this
-tasks.register("mergeShadowWithIncludes", Jar) {
-    archiveBaseName.set("merged")
-    from(zipTree(project.tasks.jar.archiveFile))
-    from(zipTree(project.tasks.shadowJar.archiveFile))
-    duplicatesStrategy(DuplicatesStrategy.EXCLUDE)
-
-    var archiveFileFrom = it.archiveFile
-    var archiveFileTo = project.tasks.jar.archiveFile
+    dependsOn tasks.named('jarJar')
+    from({ zipTree(tasks.named('jarJar').get().archiveFile.get().asFile) }) {
+        include 'META-INF/jarjar/**'
+    }
+    configurations = [project.configurations.embedded]
+    archiveClassifier = ''
+    mergeServiceFiles()
+    exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA'
+    exclude 'module-info.class', 'META-INF/versions/**/module-info.class'
+    exclude 'fabric.mod.json'
+    // Shadow expands copied jar files. Restore JarJar payloads verbatim after shading,
+    // otherwise metadata remains while the Forge bootstrap archives disappear.
     doLast {
-        archiveFileFrom.get().asFile.renameTo(archiveFileTo.get().asFile)
+        ant.zip(destfile: archiveFile.get().asFile, update: true) {
+            zipfileset(src: tasks.named('jarJar').get().archiveFile.get().asFile,
+                       includes: 'META-INF/jarjar/*.jar')
+        }
+    }
+    finalizedBy 'reobfShadowJar'
+}
+reobf { shadowJar {} }
+tasks.named('assemble') { dependsOn 'shadowJar' }
+
+// Diagnostic classpath for protocol smoke tests without launching Minecraft.
+tasks.register('writeMigrationClasspath') {
+    doLast {
+        def output = file('.migration/runtime-classpath.txt')
+        output.parentFile.mkdirs()
+        output.text = sourceSets.main.runtimeClasspath.asPath
     }
 }
-project.assemble.dependsOn(mergeShadowWithIncludes)
+
+// Development uses the same merged, descriptor-free dependencies as the release jar.
+// JavaCV's upstream module descriptor otherwise requires unused camera/OpenCV modules.
+def embeddedRuntime = tasks.register('embeddedRuntime', com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar) {
+    archiveBaseName = 'flashback-embedded-runtime'
+    archiveVersion = ''
+    archiveClassifier = ''
+    destinationDirectory = layout.buildDirectory.dir('dev-libs')
+    configurations = [project.configurations.embedded]
+    mergeServiceFiles()
+    exclude 'module-info.class', 'META-INF/versions/**/module-info.class'
+    exclude 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA'
+    exclude 'fabric.mod.json'
+    manifest.attributes('FMLModType': 'GAMELIBRARY', 'Automatic-Module-Name': 'flashback.embedded')
+    doFirst { manifest.attributes.remove('MixinConfigs') }
+}
+tasks.matching { it.name in ['runClient', 'runServer'] }.configureEach {
+    dependsOn embeddedRuntime, 'prepareDevelopmentMixinLibraries', 'copyDevelopmentRefmap'
+}
+
+// MixinGradle places the AP output into release jars but not the exploded dev resources.
+tasks.register('copyDevelopmentRefmap', Copy) {
+    dependsOn tasks.named('compileJava'), tasks.named('processResources')
+    from layout.buildDirectory.file('tmp/compileJava/flashback.refmap.json')
+    into layout.buildDirectory.dir('resources/main')
+}
+
+tasks.register('prepareDevelopmentMixinLibraries', Copy) {
+    from configurations.nestedMods
+    into layout.projectDirectory.dir('run/mods')
+}
+
+if (project.hasProperty('replaySmoke')) {
+    tasks.named('compileReplaySmokeJava') { dependsOn tasks.named('copyDevelopmentRefmap') }
+    tasks.matching { it.name == 'runClient' }.configureEach {
+        dependsOn tasks.named('compileReplaySmokeJava')
+    }
+}

@@ -40,12 +40,12 @@ public class EnhancedFlight {
         }
 
         float movementY = 0;
-        if (player.input.keyPresses.shift()) movementY -= 1;
-        if (player.input.keyPresses.jump()) movementY += 1;
+        if (player.input.shiftKeyDown) movementY -= 1;
+        if (player.input.jumping) movementY += 1;
         if (movementY != 0) {
             player.move(MoverType.SELF, new Vec3(0, flyingSpeed * movementY * 0.98, 0));
 
-            if (movementY < 0 && !Minecraft.getInstance().gameMode.isSpectator()) {
+            if (movementY < 0 && Minecraft.getInstance().gameMode.getPlayerMode() != net.minecraft.world.level.GameType.SPECTATOR) {
                 double expectedY = oldY + flyingSpeed * movementY * 0.98;
                 if (Math.abs(player.getY() - expectedY) > 1E-5) {
                     player.setOnGround(true);

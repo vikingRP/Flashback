@@ -6,7 +6,6 @@ import com.moulberry.flashback.packet.FlashbackAccurateEntityPosition;
 import com.moulberry.flashback.playback.ReplayServer;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
-import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.util.Mth;
@@ -92,12 +91,11 @@ public class AccurateEntityPositionHandler {
         return null;
     }
 
-    public static void apply(ClientLevel level, DeltaTracker deltaTracker) {
+    public static void apply(ClientLevel level, float partialTick) {
         if (currentData == null || level == null) {
             return;
         }
 
-        float partialTick = deltaTracker.getGameTimeDeltaPartialTick(true);
 
         ReplayServer replayServer = Flashback.getReplayServer();
         if (replayServer != null) {
@@ -136,7 +134,7 @@ public class AccurateEntityPositionHandler {
 
     private static void applyPosition(Entity entity, double x, double y, double z, float yaw, float pitch) {
         if (!entity.isPassenger() && Minecraft.getInstance().getCameraEntity() == entity && Minecraft.getInstance().options.getCameraType().isFirstPerson()) {
-            entity.snapTo(x, y, z, yaw, pitch);
+            entity.moveTo(x, y, z, yaw, pitch);
         }
 
         entity.setYRot(yaw);

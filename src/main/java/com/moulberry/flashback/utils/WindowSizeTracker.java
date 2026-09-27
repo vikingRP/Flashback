@@ -1,8 +1,7 @@
 package com.moulberry.flashback.utils;
 
 import com.mojang.blaze3d.platform.Window;
-import org.lwjgl.sdl.SDLError;
-import org.lwjgl.sdl.SDLVideo;
+import org.lwjgl.glfw.GLFW;
 import org.lwjgl.system.MemoryStack;
 
 import java.nio.IntBuffer;
@@ -15,8 +14,8 @@ public class WindowSizeTracker {
      * This helper will cache and calculate the real framebuffer width to avoid this issue
      */
 
-    private static int lastFramebufferWidth;
-    private static int lastFramebufferHeight;
+    private static int lastFramebufferWidth = -1;
+    private static int lastFramebufferHeight = -1;
     private static int realFramebufferWidth;
     private static int realFramebufferHeight;
 
@@ -39,9 +38,11 @@ public class WindowSizeTracker {
 
     private static void recalculate(Window window) {
         // Calculate real framebuffer width/height
-        var size = window.queryFramebufferSize();
-        realFramebufferWidth = Math.max(1, size.width());
-        realFramebufferHeight = Math.max(1, size.height());
+        int[] width = new int[1];
+        int[] height = new int[1];
+        getFramebufferSizeRaw(window.getWindow(), width, height);
+        realFramebufferWidth = Math.max(1, width[0]);
+        realFramebufferHeight = Math.max(1, height[0]);
 
         // Update cached values
         lastFramebufferWidth = window.framebufferWidth;
@@ -52,9 +53,7 @@ public class WindowSizeTracker {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer widthBuf = stack.callocInt(1);
             IntBuffer heightBuf = stack.callocInt(1);
-            if (!SDLVideo.SDL_GetWindowSizeInPixels(handle, widthBuf, heightBuf)) {
-                throw new RuntimeException(SDLError.SDL_GetError());
-            }
+            GLFW.glfwGetFramebufferSize(handle, widthBuf, heightBuf);
             width[0] = widthBuf.get();
             height[0] = heightBuf.get();
         }
@@ -64,9 +63,7 @@ public class WindowSizeTracker {
         try (MemoryStack stack = MemoryStack.stackPush()) {
             IntBuffer widthBuf = stack.callocInt(1);
             IntBuffer heightBuf = stack.callocInt(1);
-            if (!SDLVideo.SDL_GetWindowSize(handle, widthBuf, heightBuf)) {
-                throw new RuntimeException(SDLError.SDL_GetError());
-            }
+            GLFW.glfwGetWindowSize(handle, widthBuf, heightBuf);
             width[0] = widthBuf.get();
             height[0] = heightBuf.get();
         }

@@ -28,9 +28,11 @@ bin/
 
 *.DS_Store
 
-# fabric
+# Local game and diagnostic output
 
 run/
+run-prod/
+logs/
 
 # java
 
@@ -38,3 +40,9 @@ hs_err_*.log
 replay_*.log
 *.hprof
 *.jfr
+
+# Temporary migration references (not shipped)
+.migration/
+
+# Forge installer output
+forge-installer.jar.log

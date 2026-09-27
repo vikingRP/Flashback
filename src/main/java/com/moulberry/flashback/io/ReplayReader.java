@@ -11,8 +11,8 @@ import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.resources.Identifier;
+import com.moulberry.flashback.io.ReplayBuffer;
+import net.minecraft.resources.ResourceLocation;
 
 public class ReplayReader {
 
@@ -20,9 +20,9 @@ public class ReplayReader {
     private final int replaySnapshotOffset;
     private final int replayActionsOffset;
     private RegistryAccess registryAccess;
-    private Identifier lastActionName = null;
+    private ResourceLocation lastActionName = null;
     private final Int2ObjectMap<Action> actions = new Int2ObjectOpenHashMap<>();
-    private final Int2ObjectMap<Identifier> ignoredActions = new Int2ObjectOpenHashMap<>();
+    private final Int2ObjectMap<ResourceLocation> ignoredActions = new Int2ObjectOpenHashMap<>();
 
     public ReplayReader(ByteBuf byteBuf, RegistryAccess registryAccess) {
         this.friendlyByteBuf = new FriendlyByteBuf(byteBuf);
@@ -35,7 +35,7 @@ public class ReplayReader {
 
         int actions = this.friendlyByteBuf.readVarInt();
         for (int i = 0; i < actions; i++) {
-            Identifier actionName = this.friendlyByteBuf.readIdentifier();
+            ResourceLocation actionName = this.friendlyByteBuf.readResourceLocation();
             Action action = ActionRegistry.getAction(actionName);
 
             if (action == null) {
@@ -92,7 +92,7 @@ public class ReplayReader {
 
             int size = this.friendlyByteBuf.readInt();
             ByteBuf slice = this.friendlyByteBuf.readSlice(size);
-            RegistryFriendlyByteBuf registryFriendlyByteBuf = new RegistryFriendlyByteBuf(slice, this.registryAccess);
+            ReplayBuffer registryFriendlyByteBuf = new ReplayBuffer(slice, this.registryAccess);
             action.handle(replayServer, registryFriendlyByteBuf);
 
             if (slice.readerIndex() < slice.writerIndex()) {
@@ -126,7 +126,7 @@ public class ReplayReader {
 
         int size = this.friendlyByteBuf.readInt();
         ByteBuf slice = this.friendlyByteBuf.readSlice(size);
-        RegistryFriendlyByteBuf registryFriendlyByteBuf = new RegistryFriendlyByteBuf(slice, this.registryAccess);
+        ReplayBuffer registryFriendlyByteBuf = new ReplayBuffer(slice, this.registryAccess);
         action.handle(replayServer, registryFriendlyByteBuf);
 
         if (slice.readerIndex() < slice.writerIndex()) {

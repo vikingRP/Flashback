@@ -9,12 +9,11 @@ import com.moulberry.flashback.Flashback;
 import com.moulberry.flashback.SneakyThrow;
 import com.moulberry.flashback.record.FlashbackMeta;
 import com.moulberry.flashback.screen.ReplaySummary;
-import net.minecraft.util.Util;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.ObjectSelectionList;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
-import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.resources.sounds.SimpleSoundInstance;
 import net.minecraft.sounds.SoundEvents;
 import org.jetbrains.annotations.Nullable;
@@ -44,7 +43,7 @@ public class ReplaySelectionList extends ObjectSelectionList<ReplaySelectionEntr
             String filter, ReplaySorting replaySorting, boolean sortDescending,
             LinkedHashMap<String, LinkedHashSet<String>> currentNamespacesForRegistries,
             @Nullable ReplaySelectionList replaySelectionList) {
-        super(minecraft, i, j, k, l);
+        super(minecraft, i, j + 112, k, k + j, l);
         this.screen = selectReplayScreen;
         this.loadingHeader = new ReplaySelectionEntry.LoadingHeader(minecraft);
         this.loadFromDeviceHeader = new ReplaySelectionEntry.LoadFromDeviceHeader(minecraft);
@@ -76,8 +75,8 @@ public class ReplaySelectionList extends ObjectSelectionList<ReplaySelectionEntr
     }
 
     @Override
-    public boolean keyPressed(KeyEvent keyEvent) {
-        if (keyEvent.isSelection()) {
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if ((keyCode == 257 || keyCode == 335 || keyCode == 32)) {
             ReplaySelectionEntry.ReplayListEntry replayListEntry = this.getReplayListEntry();
             if (replayListEntry != null && replayListEntry.canOpen()) {
                 this.minecraft.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.UI_BUTTON_CLICK, 1.0f));
@@ -86,11 +85,11 @@ public class ReplaySelectionList extends ObjectSelectionList<ReplaySelectionEntr
             }
         }
 
-        return super.keyPressed(keyEvent);
+        return super.keyPressed(keyCode, scanCode, modifiers);
     }
 
     @Override
-    public void extractWidgetRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float a) {
+    public void render(GuiGraphics graphics, int mouseX, int mouseY, float a) {
         List<PendingSelectionEntry> list = this.pollReplaysIgnoreErrors();
         if (this.currentlyDisplayedReplays != list) {
             if (list == null) {
@@ -102,7 +101,7 @@ public class ReplaySelectionList extends ObjectSelectionList<ReplaySelectionEntr
 
             this.currentlyDisplayedReplays = list;
         }
-        super.extractWidgetRenderState(graphics, mouseX, mouseY, a);
+        super.render(graphics, mouseX, mouseY, a);
     }
 
     public void updateFilter(String filter, ReplaySorting replaySorting, boolean sortDescending) {
@@ -233,7 +232,7 @@ public class ReplaySelectionList extends ObjectSelectionList<ReplaySelectionEntr
     }
 
     private void notifyListUpdated() {
-        this.refreshScrollAmount();
+        this.setScrollAmount(this.getScrollAmount());
         this.screen.triggerImmediateNarration(true);
         this.screen.updateButtonStatus(null);
     }
@@ -273,12 +272,12 @@ public class ReplaySelectionList extends ObjectSelectionList<ReplaySelectionEntr
     }
 
     @Override
-    public void updateWidgetNarration(NarrationElementOutput narrationElementOutput) {
+    public void updateNarration(NarrationElementOutput narrationElementOutput) {
         if (this.children().contains(this.loadingHeader)) {
             this.loadingHeader.updateNarration(narrationElementOutput);
             return;
         }
-        super.updateWidgetNarration(narrationElementOutput);
+        super.updateNarration(narrationElementOutput);
     }
 
 }

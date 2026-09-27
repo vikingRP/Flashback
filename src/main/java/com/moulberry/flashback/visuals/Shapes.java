@@ -23,14 +23,16 @@ public class Shapes {
         float dx = toX - fromX;
         float dy = toY - fromY;
         float dz = toZ - fromZ;
-        float distanceInv = 1f / (float) Math.sqrt(dx*dx + dy*dy + dz*dz);
+        float distanceSquared = dx*dx + dy*dy + dz*dz;
+        if (distanceSquared < 1e-12f) return;
+        float distanceInv = 1f / (float) Math.sqrt(distanceSquared);
         dx *= distanceInv;
         dy *= distanceInv;
         dz *= distanceInv;
 
         Matrix4f transform = pose.pose();
-        bufferBuilder.addVertex(transform, fromX, fromY, fromZ).setColor(red, green, blue, alpha).setNormal(pose, dx, dy, dz).setLineWidth(2f);
-        bufferBuilder.addVertex(transform, toX, toY, toZ).setColor(red, green, blue, alpha).setNormal(pose, dx, dy, dz).setLineWidth(2f);
+        bufferBuilder.vertex(transform, fromX, fromY, fromZ).color(red, green, blue, alpha).normal(pose.normal(), dx, dy, dz).endVertex();
+        bufferBuilder.vertex(transform, toX, toY, toZ).color(red, green, blue, alpha).normal(pose.normal(), dx, dy, dz).endVertex();
     }
 
 }

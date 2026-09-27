@@ -3,226 +3,119 @@ package com.moulberry.flashback.mixin;
 import com.llamalad7.mixinextras.injector.v2.WrapWithCondition;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
-import com.llamalad7.mixinextras.sugar.Local;
-import com.llamalad7.mixinextras.sugar.ref.LocalRef;
 import com.mojang.blaze3d.pipeline.RenderTarget;
-import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
-import com.mojang.renderpearl.api.GpuFormat;
-import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
-import com.mojang.renderpearl.api.commands.RenderPass;
-import com.mojang.renderpearl.api.textures.FilterMode;
-import com.mojang.renderpearl.api.textures.GpuSampler;
-import com.mojang.renderpearl.api.textures.GpuTexture;
-import com.mojang.renderpearl.api.textures.GpuTextureView;
 import com.moulberry.flashback.Flashback;
 import com.moulberry.flashback.combo_options.ExportProjection;
-import com.moulberry.flashback.exporting.ExportJob;
-import com.moulberry.flashback.playback.ReplayServer;
-import com.moulberry.flashback.state.EditorState;
-import com.moulberry.flashback.state.EditorStateManager;
 import com.moulberry.flashback.editor.ui.ReplayUI;
-import com.moulberry.flashback.visuals.ReplayVisuals;
+import com.moulberry.flashback.state.EditorStateManager;
+import com.moulberry.flashback.utils.FramebufferUtils;
 import com.moulberry.flashback.visuals.ShaderManager;
-import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.minecraft.client.Camera;
-import net.minecraft.client.CloudStatus;
-import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.particle.ParticleEngine;
 import net.minecraft.client.renderer.*;
-import net.minecraft.client.renderer.chunk.ChunkSectionLayerGroup;
-import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
-import net.minecraft.client.renderer.chunk.SectionRenderDispatcher;
-import net.minecraft.client.renderer.culling.Frustum;
-import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
-import net.minecraft.client.renderer.entity.state.AvatarRenderState;
-import net.minecraft.client.renderer.entity.state.EntityRenderState;
-import net.minecraft.client.renderer.feature.FeatureRenderDispatcher;
-import net.minecraft.client.renderer.state.OptionsRenderState;
-import net.minecraft.client.renderer.state.level.CameraRenderState;
-import net.minecraft.client.renderer.state.level.LevelRenderState;
-import net.minecraft.client.renderer.state.level.ParticlesRenderState;
-import net.minecraft.world.TickRateManager;
-import org.jetbrains.annotations.Nullable;
+import net.minecraft.client.renderer.blockentity.BlockEntityRenderDispatcher;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import org.joml.Matrix4f;
-import org.joml.Matrix4fc;
 import org.joml.Quaternionf;
-import org.joml.Vector4f;
-import org.objectweb.asm.Opcodes;
-import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
-import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-import java.util.Optional;
-import java.util.OptionalInt;
-
 @Mixin(value = LevelRenderer.class, priority = 1100)
 public abstract class MixinLevelRenderer {
+    @Unique private RenderTarget flashback$roundAlpha;
 
-    @Shadow @Final public ObjectArrayList<SectionRenderDispatcher.RenderSection> visibleSections;
+    @WrapOperation(method = "compileChunks", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/chunk/ChunkRenderDispatcher$RenderChunk;rebuildChunkAsync(Lnet/minecraft/client/renderer/chunk/ChunkRenderDispatcher;Lnet/minecraft/client/renderer/chunk/RenderRegionCache;)V"))
+    private void flashback$finishChunk(net.minecraft.client.renderer.chunk.ChunkRenderDispatcher.RenderChunk chunk,
+            net.minecraft.client.renderer.chunk.ChunkRenderDispatcher dispatcher,
+            net.minecraft.client.renderer.chunk.RenderRegionCache cache, Operation<Void> original) {
+        if (com.moulberry.flashback.exporting.PerfectFrames.isEnabled()) {
+            dispatcher.rebuildChunkSync(chunk, cache);
+            dispatcher.uploadAllPendingUploads();
+        } else original.call(chunk, dispatcher, cache);
+    }
 
-    @Shadow private @Nullable SectionRenderDispatcher sectionRenderDispatcher;
+    @Inject(method = "renderLevel", at = @At("HEAD"))
+    private void flashback$projection(PoseStack poses, float partialTick, long time, boolean outline, Camera camera,
+            GameRenderer renderer, LightTexture light, Matrix4f projection, CallbackInfo ci) {
+        ReplayUI.lastProjectionMatrix = new Matrix4f(projection);
+        // 1.20.1 cameras look down +Z using rotationYXZ(-yaw, pitch, 0); ReplayUI expects the newer
+        // -Z convention, rotationYXZ(PI - yaw, -pitch, 0), which is the same rotation followed by a half-turn around Y
+        ReplayUI.lastViewQuaternion = new Quaternionf(camera.rotation()).rotateY((float) Math.PI);
+    }
 
-    @Shadow @Final public SectionOcclusionGraph sectionOcclusionGraph;
+    @Inject(method = "renderLevel", at = @At("RETURN"))
+    private void flashback$depth(CallbackInfo ci) {
+        if (Flashback.EXPORT_JOB != null && Flashback.EXPORT_JOB.isRunning()) Flashback.EXPORT_JOB.tryDepthDownload();
+    }
 
-    @Shadow @Final private LevelTargetBundle targets;
-
-    @Shadow
-    @Final
-    private LevelRenderState levelRenderState;
-
-    @Inject(method = "render", at = @At("HEAD"))
-    public void renderLevel(CallbackInfo ci, @Local(argsOnly = true) Vector4f fogColor, @Local(argsOnly = true) CameraRenderState cameraState) {
-        ReplayUI.lastProjectionMatrix = new Matrix4f(cameraState.projectionMatrix);
-        ReplayUI.lastViewQuaternion = new Quaternionf(cameraState.orientation);
-
-        EditorState editorState = EditorStateManager.getCurrent();
-        if (editorState != null) {
-            ReplayVisuals visuals = editorState.replayVisuals;
-
-            if (!visuals.renderSky) {
-                if (Flashback.isExporting() && Flashback.EXPORT_JOB.getSettings().transparent()) {
-                    fogColor.set(0f, 0f, 0f, 0f);
-                } else {
-                    float[] skyColour = visuals.skyColour;
-                    fogColor.set(skyColour[0], skyColour[1], skyColour[2], 1f);
-                }
+    @Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/RenderSystem;clear(IZ)V"))
+    private void flashback$skyClear(CallbackInfo ci) {
+        var state = EditorStateManager.getCurrent();
+        if (state != null && !state.replayVisuals.renderSky) {
+            if (Flashback.isExporting() && Flashback.EXPORT_JOB.getSettings().transparent()) {
+                RenderSystem.clearColor(0f, 0f, 0f, 0f);
+            } else {
+                float[] colour = state.replayVisuals.skyColour;
+                RenderSystem.clearColor(colour[0], colour[1], colour[2], 1f);
             }
         }
     }
 
-    @Inject(method = "render", at = @At("RETURN"))
-    public void renderLevelRet(CallbackInfo ci) {
-        ExportJob exportJob = Flashback.EXPORT_JOB;
-        if (exportJob != null && exportJob.isRunning()) {
-            exportJob.tryDepthDownload();
+    @Inject(method = "renderChunkLayer", at = @At("HEAD"), cancellable = true)
+    private void flashback$blocks(RenderType layer, PoseStack poses, double x, double y, double z, Matrix4f projection, CallbackInfo ci) {
+        var state = EditorStateManager.getCurrent();
+        if (state != null && !state.replayVisuals.renderBlocks) { ci.cancel(); return; }
+        if (layer == RenderType.translucent() && Flashback.isExporting() && Flashback.EXPORT_JOB.getSettings().transparent()) {
+            RenderTarget main = Minecraft.getInstance().getMainRenderTarget();
+            flashback$roundAlpha = FramebufferUtils.resizeOrCreateFramebuffer(flashback$roundAlpha, main.width, main.height, false);
+            ShaderManager.blit(main.getColorTextureId(), flashback$roundAlpha.frameBufferId, main.width, main.height,
+                0, 0, 1, 1, false, false, false, 0, 0);
+            ShaderManager.blit(flashback$roundAlpha.getColorTextureId(), main.frameBufferId, main.width, main.height,
+                0, 0, 1, 1, false, false, true, 0, 0);
         }
     }
 
-    @Unique
-    private GpuTexture roundAlphaBuffer = null;
-    @Unique
-    private GpuTextureView roundAlphaBufferView = null;
+    @WrapWithCondition(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/blockentity/BlockEntityRenderDispatcher;render(Lnet/minecraft/world/level/block/entity/BlockEntity;FLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/MultiBufferSource;)V"))
+    private boolean flashback$blockEntities(BlockEntityRenderDispatcher dispatcher, BlockEntity block, float partialTick, PoseStack poses, MultiBufferSource buffers) {
+        var state = EditorStateManager.getCurrent();
+        return state == null || state.replayVisuals.renderBlocks;
+    }
+
+    @com.llamalad7.mixinextras.injector.ModifyExpressionValue(method = "renderLevel", at = @At(value = "FIELD", target = "Lnet/minecraft/client/renderer/LevelRenderer;destructionProgress:Lit/unimi/dsi/fastutil/longs/Long2ObjectMap;"))
+    private it.unimi.dsi.fastutil.longs.Long2ObjectMap<java.util.SortedSet<net.minecraft.server.level.BlockDestructionProgress>> flashback$blockDamage(
+            it.unimi.dsi.fastutil.longs.Long2ObjectMap<java.util.SortedSet<net.minecraft.server.level.BlockDestructionProgress>> original) {
+        var state = EditorStateManager.getCurrent();
+        return state != null && !state.replayVisuals.renderBlocks ? it.unimi.dsi.fastutil.longs.Long2ObjectMaps.emptyMap() : original;
+    }
+
+    @Inject(method = "renderHitOutline", at = @At("HEAD"), cancellable = true)
+    private void flashback$blockOutline(CallbackInfo ci) {
+        var state = EditorStateManager.getCurrent();
+        if (state != null && !state.replayVisuals.renderBlocks) ci.cancel();
+    }
+
+    @Inject(method = "renderEntity", at = @At("HEAD"), cancellable = true)
+    private void flashback$entities(Entity entity, double x, double y, double z, float partialTick, PoseStack poses, MultiBufferSource buffers, CallbackInfo ci) {
+        var state = EditorStateManager.getCurrent();
+        if (state != null && !(entity instanceof Player ? state.replayVisuals.renderPlayers : state.replayVisuals.renderEntities)) ci.cancel();
+    }
+
+    @Inject(method = {"renderSky", "renderClouds"}, at = @At("HEAD"), cancellable = true)
+    private void flashback$sky(CallbackInfo ci) {
+        var state = EditorStateManager.getCurrent();
+        if (state != null && !state.replayVisuals.renderSky) ci.cancel();
+        if (Flashback.EXPORT_JOB != null && Flashback.EXPORT_JOB.getSettings().projection() == ExportProjection.ORTHOGRAPHIC) ci.cancel();
+    }
 
     @Inject(method = "close", at = @At("HEAD"))
-    public void close(CallbackInfo ci) {
-        if (this.roundAlphaBuffer != null) {
-            this.roundAlphaBuffer.close();
-            this.roundAlphaBuffer = null;
-        }
-        if (this.roundAlphaBufferView != null) {
-            this.roundAlphaBufferView.close();
-            this.roundAlphaBufferView = null;
-        }
+    private void flashback$close(CallbackInfo ci) {
+        if (flashback$roundAlpha != null) { flashback$roundAlpha.destroyBuffers(); flashback$roundAlpha = null; }
     }
-
-    @WrapOperation(method = {"executeSolid", "executeClassicTransparency", "executeOit"}, at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/chunk/ChunkSectionsToRender;renderGroup(Lnet/minecraft/client/renderer/chunk/ChunkSectionLayerGroup;Lcom/mojang/renderpearl/api/commands/RenderPass;Lcom/mojang/renderpearl/api/textures/GpuSampler;Lcom/mojang/renderpearl/api/textures/GpuTextureView;Z)V"))
-    public void renderChunkSections(ChunkSectionsToRender instance, ChunkSectionLayerGroup group, RenderPass renderPass, GpuSampler sampler, GpuTextureView atlas, boolean renderWireframeTerrain, Operation<Void> original) {
-        EditorState editorState = EditorStateManager.getCurrent();
-        if (editorState != null) {
-            if (!editorState.replayVisuals.renderBlocks) {
-                return;
-            }
-        }
-
-        original.call(instance, group, renderPass, sampler, atlas, renderWireframeTerrain);
-    }
-
-    @Inject(method = "lambda$addMainPass$0", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/LevelRenderer;executeOit(Lnet/minecraft/client/renderer/chunk/ChunkSectionsToRender;Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;)V", shift = At.Shift.BEFORE))
-    public void mainPass_executeOit(CallbackInfo ci) {
-        if (Flashback.isExporting() && Flashback.EXPORT_JOB.getSettings().transparent()) {
-            RenderTarget main = Minecraft.getInstance().gameRenderer.mainRenderTarget();
-
-            if (this.roundAlphaBuffer == null) {
-                this.roundAlphaBuffer = RenderSystem.getDevice().createTexture(() -> "flashback round alpha buffer", GpuTexture.USAGE_RENDER_ATTACHMENT, GpuFormat.RGBA8_UNORM, main.width, main.height, 1, 1);
-                this.roundAlphaBufferView = RenderSystem.getDevice().createTextureView(this.roundAlphaBuffer);
-            } else if (this.roundAlphaBuffer.getWidth(0) != main.width || this.roundAlphaBuffer.getHeight(0) != main.height) {
-                this.roundAlphaBuffer.close();
-                this.roundAlphaBufferView.close();
-                this.roundAlphaBuffer = RenderSystem.getDevice().createTexture(() -> "flashback round alpha buffer", GpuTexture.USAGE_RENDER_ATTACHMENT, GpuFormat.RGBA8_UNORM, main.width, main.height, 1, 1);
-                this.roundAlphaBufferView = RenderSystem.getDevice().createTextureView(this.roundAlphaBuffer);
-            }
-
-            try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(() -> "flashback round alpha render pass 1", this.roundAlphaBufferView, Optional.empty())) {
-                renderPass.setPipeline(RenderSystem.getCompiledPipeline(ShaderManager.BLIT_SCREEN));
-                RenderSystem.bindDefaultUniforms(renderPass);
-                renderPass.setUniform("InSampler", main.getColorTextureView(), RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
-                renderPass.draw(3, 1, 0, 0);
-            }
-
-            try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(() -> "flashback round alpha render pass 2", main.getColorTextureView(), Optional.empty())) {
-                renderPass.setPipeline(RenderSystem.getCompiledPipeline(ShaderManager.BLIT_SCREEN_ROUND_ALPHA));
-                RenderSystem.bindDefaultUniforms(renderPass);
-                renderPass.setUniform("InSampler", this.roundAlphaBufferView, RenderSystem.getSamplerCache().getClampToEdge(FilterMode.NEAREST));
-                renderPass.draw(3, 1, 0, 0);
-            }
-        }
-    }
-
-    @Inject(method = "submitBlockEntities", at = @At("HEAD"), cancellable = true)
-    public void renderBlockEntities(CallbackInfo ci) {
-        EditorState editorState = EditorStateManager.getCurrent();
-        if (editorState != null && !editorState.replayVisuals.renderBlocks) {
-            ci.cancel();
-        }
-    }
-
-    @WrapWithCondition(method = "submitEntities", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/entity/EntityRenderDispatcher;submit(Lnet/minecraft/client/renderer/entity/state/EntityRenderState;Lnet/minecraft/client/renderer/state/level/CameraRenderState;DDDLcom/mojang/blaze3d/vertex/PoseStack;Lnet/minecraft/client/renderer/SubmitNodeCollector;)V"))
-    public boolean renderEntity(EntityRenderDispatcher instance, EntityRenderState entityRenderState, CameraRenderState cameraRenderState,
-                                double d, double e, double f, PoseStack poseStack, SubmitNodeCollector submitNodeCollector) {
-        EditorState editorState = EditorStateManager.getCurrent();
-        if (entityRenderState instanceof AvatarRenderState) {
-            return editorState == null || editorState.replayVisuals.renderPlayers;
-        } else {
-            return editorState == null || editorState.replayVisuals.renderEntities;
-        }
-    }
-
-    @Inject(method = "addSkyPass", at = @At("HEAD"), cancellable = true)
-    public void addSkyPass(CallbackInfo ci) {
-        EditorState editorState = EditorStateManager.getCurrent();
-        if (editorState != null && !editorState.replayVisuals.renderSky) {
-            ci.cancel();
-        }
-        ExportJob exportJob = Flashback.EXPORT_JOB;
-        if (exportJob != null && exportJob.getSettings().projection() == ExportProjection.ORTHOGRAPHIC) {
-            ci.cancel();
-        }
-    }
-
-//    @WrapOperation(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/LevelRenderer;setupRender(Lnet/minecraft/client/Camera;Lnet/minecraft/client/renderer/culling/Frustum;ZZ)V"), require = 0)
-//    public void setupRender(LevelRenderer instance, Camera camera, Frustum frustum, boolean capturedFrustum, boolean isSpectator, Operation<Void> original) {
-//        if (PerfectFrames.isEnabled()) {
-//            boolean doCompile = true;
-//            while (doCompile) {
-//                doCompile = false;
-//
-//                int before = this.visibleSections.size();
-//                original.call(instance, camera, frustum, capturedFrustum, isSpectator);
-//                if (this.visibleSections.size() != before) {
-//                    doCompile = true;
-//                }
-//
-//                RenderRegionCache renderRegionCache = new RenderRegionCache();
-//                for (SectionRenderDispatcher.RenderSection renderSection : this.visibleSections) {
-//                    if (renderSection.isDirty()) {
-//                        this.sectionRenderDispatcher.rebuildSectionSync(renderSection, renderRegionCache);
-//                        renderSection.setNotDirty();
-//                        doCompile = true;
-//                    }
-//                }
-//
-//                this.sectionRenderDispatcher.uploadAllPendingUploads();
-//            }
-//        } else {
-//            original.call(instance, camera, frustum, capturedFrustum, isSpectator);
-//        }
-//    }
-
 }

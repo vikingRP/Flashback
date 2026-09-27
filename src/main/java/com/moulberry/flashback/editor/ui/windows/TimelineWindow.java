@@ -48,7 +48,6 @@ import imgui.moulberry90.type.ImString;
 import it.unimi.dsi.fastutil.ints.*;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.input.InputQuirks;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
@@ -574,7 +573,7 @@ public class TimelineWindow {
                         double distance = delta.length();
                         if (distance > 3) {
                             Vec3 repositioned = delta.normalize().scale(3).add(target).subtract(0, player.getEyeHeight(), 0);
-                            player.snapTo(repositioned);
+                            player.moveTo(repositioned.x, repositioned.y, repositioned.z);
                         }
                         player.lookAt(EntityAnchorArgument.Anchor.EYES, target);
                         player.setDeltaMovement(Vec3.ZERO);
@@ -1292,9 +1291,9 @@ public class TimelineWindow {
         }
         replayServer.replayPaused = !replayServer.replayPaused;
         if (!replayServer.replayPaused) {
-            Screen screen = Minecraft.getInstance().gui.screen();
+            Screen screen = Minecraft.getInstance().screen;
             if (screen != null && screen.isPauseScreen()) {
-                Minecraft.getInstance().gui.setScreen(null);
+                Minecraft.getInstance().setScreen(null);
             }
         }
     }
@@ -1421,7 +1420,7 @@ public class TimelineWindow {
             }
         }
 
-        boolean multiple = selectedKeyframesList.size() >= 2 || selectedKeyframesList.getFirst().keyframeTicks().size() >= 2;
+        boolean multiple = selectedKeyframesList.size() >= 2 || selectedKeyframesList.get(0).keyframeTicks().size() >= 2;
 
         if (ImGui.button((multiple ? I18n.get("flashback.remove_all") : I18n.get("flashback.remove")) + "##RemoveButton")) {
             ImGui.closeCurrentPopup();

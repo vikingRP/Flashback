@@ -1,7 +1,6 @@
 package com.moulberry.flashback.editor.ui.windows;
 
 import com.mojang.authlib.GameProfile;
-import com.mojang.authlib.services.ProfileResult;
 import com.moulberry.flashback.FilePlayerSkin;
 import com.moulberry.flashback.Utils;
 import com.moulberry.flashback.combo_options.GlowingOverride;
@@ -11,19 +10,17 @@ import com.moulberry.flashback.state.EditorState;
 import com.moulberry.flashback.utils.AsyncFileDialogs;
 import imgui.moulberry90.ImGui;
 import imgui.moulberry90.type.ImString;
-import net.fabricmc.loader.api.FabricLoader;
+import com.moulberry.flashback.platform.ForgePlatform;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.commands.arguments.EntityAnchorArgument;
-import net.minecraft.world.entity.Avatar;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.entity.player.PlayerModelPart;
 import net.minecraft.world.level.GameType;
-import net.minecraft.world.scores.DisplaySlot;
 import net.minecraft.world.scores.Objective;
 import net.minecraft.world.scores.PlayerTeam;
 import net.minecraft.world.scores.Scoreboard;
@@ -51,7 +48,7 @@ public class SelectedEntityPopup {
 
         GameProfile skinOverride = editorState.skinOverride.get(entity.getUUID());
         if (skinOverride != null) {
-            changeSkinInput.set(skinOverride.id().toString());
+            changeSkinInput.set(skinOverride.getId().toString());
         } else {
             changeSkinInput.set("");
         }
@@ -87,7 +84,7 @@ public class SelectedEntityPopup {
             editorState.markDirty();
         }
 
-        if (FabricLoader.getInstance().isModLoaded("voicechat")) {
+        if (ForgePlatform.getInstance().isModLoaded("voicechat")) {
             boolean isMuted = editorState.muteVoice.contains(entity.getUUID());
             if (ImGui.checkbox(I18n.get("flashback.mute_voice"), isMuted)) {
                 if (isMuted) {
@@ -100,7 +97,7 @@ public class SelectedEntityPopup {
         }
 
         boolean isHiddenDuringExport;
-        if (editorState.hideAllSpectators && entity instanceof Player player && player.gameMode() == GameType.SPECTATOR) {
+        if (editorState.hideAllSpectators && entity instanceof Player player && player.isSpectator()) {
             isHiddenDuringExport = true;
             ImGui.beginDisabled();
             ImGui.checkbox(I18n.get("flashback.hide_during_export"), true);
@@ -124,7 +121,7 @@ public class SelectedEntityPopup {
                     if (ImGui.checkbox(I18n.get("flashback.hide_cape"), true)) {
                         editorState.hideCape.remove(player.getUUID());
                     }
-                } else if (player.isModelPartShown(PlayerModelPart.CAPE) && player.getSkin().cape() != null) {
+                } else if (player.isModelPartShown(PlayerModelPart.CAPE) && player.getCloakTextureLocation() != null) {
                     if (ImGui.checkbox(I18n.get("flashback.hide_cape"), false)) {
                         editorState.hideCape.add(player.getUUID());
                     }
@@ -157,7 +154,7 @@ public class SelectedEntityPopup {
                             editorState.hideTeamPrefix.remove(player.getUUID());
                         }
                     } else {
-                        PlayerTeam team = player.getTeam();
+                        PlayerTeam team = player.getTeam() instanceof PlayerTeam playerTeam ? playerTeam : null;
                         if (team != null && !Utils.isComponentEmpty(team.getPlayerPrefix())) {
                             if (ImGui.checkbox(I18n.get("flashback.hide_team_prefix"), false)) {
                                 editorState.hideTeamPrefix.add(player.getUUID());
@@ -170,7 +167,7 @@ public class SelectedEntityPopup {
                             editorState.hideTeamSuffix.remove(player.getUUID());
                         }
                     } else {
-                        PlayerTeam team = player.getTeam();
+                        PlayerTeam team = player.getTeam() instanceof PlayerTeam playerTeam ? playerTeam : null;
                         if (team != null && !Utils.isComponentEmpty(team.getPlayerSuffix())) {
                             if (ImGui.checkbox(I18n.get("flashback.hide_team_suffix"), false)) {
                                 editorState.hideTeamSuffix.add(player.getUUID());
@@ -184,7 +181,7 @@ public class SelectedEntityPopup {
                         }
                     } else {
                         Scoreboard scoreboard = player.level().getScoreboard();
-                        Objective objective = scoreboard.getDisplayObjective(DisplaySlot.BELOW_NAME);
+                        Objective objective = scoreboard.getDisplayObjective(2);
                         if (objective != null) {
                             if (ImGui.checkbox(I18n.get("flashback.hide_text_below_name"), false)) {
                                 editorState.hideBelowName.add(player.getUUID());
@@ -204,9 +201,9 @@ public class SelectedEntityPopup {
                     try {
                         UUID changeSkinUuid = UUID.fromString(string);
                         if (ImGui.button(I18n.get("flashback.apply_skin_from_uuid"))) {
-                            ProfileResult profile = Minecraft.getInstance().services().sessionService().fetchProfile(changeSkinUuid, true);
+                            GameProfile profile = Minecraft.getInstance().getMinecraftSessionService().fillProfileProperties(new GameProfile(changeSkinUuid, ""), true);
                             if (profile != null) {
-                                editorState.skinOverride.put(entity.getUUID(), profile.profile());
+                                editorState.skinOverride.put(entity.getUUID(), profile);
                                 editorState.skinOverrideFromFile.remove(entity.getUUID());
                             }
                         }
@@ -214,7 +211,7 @@ public class SelectedEntityPopup {
                 }
 
                 if (ImGui.button(I18n.get("flashback.upload_skin_from_file"))) {
-                    Path gameDir = FabricLoader.getInstance().getGameDir();
+                    Path gameDir = ForgePlatform.getInstance().getGameDir();
                     CompletableFuture<String> future = AsyncFileDialogs.openFileDialog(gameDir.toString(),
                         "Skin Texture", "png");
                     future.thenAccept(pathStr -> {
@@ -247,9 +244,7 @@ public class SelectedEntityPopup {
                     boolean changed = false;
 
                     for (EquipmentSlot value : EquipmentSlot.values()) {
-                        if (entity instanceof Player && (value == EquipmentSlot.BODY || value == EquipmentSlot.SADDLE)) {
-                            continue;
-                        }
+                        
 
                         boolean hidden = hiddenEquipment.contains(value);
                         if (ImGui.checkbox(value.getName(), !hidden)) {
@@ -271,7 +266,7 @@ public class SelectedEntityPopup {
                     }
                 }
             }
-            if (entity instanceof Avatar avatar) {
+            if (entity instanceof Player avatar) {
                 if (ImGui.collapsingHeader("Model Parts")) {
                     EnumSet<PlayerModelPart> hiddenModelParts = editorState.hiddenModelParts.get(entity.getUUID());
 

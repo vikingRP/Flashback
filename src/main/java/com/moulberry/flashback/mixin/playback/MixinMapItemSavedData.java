@@ -14,7 +14,7 @@ public class MixinMapItemSavedData {
 
     @Inject(method = "tickCarriedBy", at = @At(
         value = "INVOKE",
-        target = "Lnet/minecraft/world/level/saveddata/maps/MapItemSavedData;mapMatcher(Lnet/minecraft/world/item/ItemStack;)Ljava/util/function/Predicate;",
+        target = "Lnet/minecraft/world/entity/player/Inventory;contains(Lnet/minecraft/world/item/ItemStack;)Z",
         shift = At.Shift.BEFORE
     ), cancellable = true)
     public void tickCarriedBy(CallbackInfo ci) {

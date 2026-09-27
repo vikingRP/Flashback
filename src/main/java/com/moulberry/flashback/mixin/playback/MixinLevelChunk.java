@@ -36,8 +36,8 @@ public abstract class MixinLevelChunk extends ChunkAccess implements LevelChunkE
     @Final
     private Level level;
 
-    public MixinLevelChunk(ChunkPos chunkPos, UpgradeData upgradeData, LevelHeightAccessor levelHeightAccessor, PalettedContainerFactory palettedContainerFactory, long l, @Nullable LevelChunkSection[] levelChunkSections, @Nullable BlendingData blendingData) {
-        super(chunkPos, upgradeData, levelHeightAccessor, palettedContainerFactory, l, levelChunkSections, blendingData);
+    public MixinLevelChunk(ChunkPos chunkPos, UpgradeData upgradeData, LevelHeightAccessor levelHeightAccessor, Registry<Biome> biomeRegistry, long l, @Nullable LevelChunkSection[] levelChunkSections, @Nullable BlendingData blendingData) {
+        super(chunkPos, upgradeData, levelHeightAccessor, biomeRegistry, l, levelChunkSections, blendingData);
     }
 
     @Shadow
@@ -49,7 +49,6 @@ public abstract class MixinLevelChunk extends ChunkAccess implements LevelChunkE
     @Shadow
     public abstract @Nullable BlockEntity getBlockEntity(BlockPos blockPos, LevelChunk.EntityCreationType entityCreationType);
 
-    @Shadow public abstract void markUnsaved();
 
     @Unique
     private int cachedChunkId = -1;
@@ -65,7 +64,7 @@ public abstract class MixinLevelChunk extends ChunkAccess implements LevelChunkE
     }
 
     @Inject(method = "setBlockState", at = @At("RETURN"))
-    public void setBlockState(BlockPos blockPos, BlockState blockState, int i, CallbackInfoReturnable<BlockState> cir) {
+    public void setBlockState(BlockPos blockPos, BlockState blockState, boolean moved, CallbackInfoReturnable<BlockState> cir) {
         ReplayServer replayServer = Flashback.getReplayServer();
         if (replayServer == null) {
             return;
@@ -113,11 +112,10 @@ public abstract class MixinLevelChunk extends ChunkAccess implements LevelChunkE
         boolean newHasOnlyAir = levelChunkSection.hasOnlyAir();
         if (oldHasOnlyAir != newHasOnlyAir) {
             this.level.getChunkSource().getLightEngine().updateSectionStatus(blockPos, newHasOnlyAir);
-            this.level.getChunkSource().onSectionEmptinessChanged(this.chunkPos.x(), SectionPos.blockToSectionCoord(y), this.chunkPos.z(), newHasOnlyAir);
         }
 
         // Update light
-        if (LightEngine.hasDifferentLightProperties(oldBlockState, blockState)) {
+        if (LightEngine.hasDifferentLightProperties(this, blockPos, oldBlockState, blockState)) {
             if (this.skyLightSources != null) {
                 this.skyLightSources.update(this, localX, y, localZ);
             }
@@ -145,7 +143,7 @@ public abstract class MixinLevelChunk extends ChunkAccess implements LevelChunkE
             }
         }
 
-        this.markUnsaved();
+        this.setUnsaved(true);
         return oldBlockState;
     }
 

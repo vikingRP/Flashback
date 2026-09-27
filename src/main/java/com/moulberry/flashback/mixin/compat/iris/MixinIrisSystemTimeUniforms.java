@@ -9,7 +9,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-@IfModLoaded("iris")
+@IfModLoaded(value = "iris", aliases = "oculus")
 @Pseudo
 @Mixin(value = SystemTimeUniforms.Timer.class, remap = false)
 public class MixinIrisSystemTimeUniforms {

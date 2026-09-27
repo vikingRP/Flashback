@@ -31,8 +31,8 @@ public class RegistryHelper {
 
         // Check counts first, as a fast path
         for (RegistryDataLoader.RegistryData<?> registryData : registries) {
-            Optional<? extends Registry<?>> registryOne = one.lookup(registryData.key());
-            Optional<? extends Registry<?>> registryTwo = two.lookup(registryData.key());
+            Optional<? extends Registry<?>> registryOne = one.registry(registryData.key());
+            Optional<? extends Registry<?>> registryTwo = two.registry(registryData.key());
 
             if (registryOne.isEmpty() || registryTwo.isEmpty()) {
                 if (registryOne.isEmpty() && registryTwo.isEmpty()) {
@@ -74,8 +74,8 @@ public class RegistryHelper {
 
     private static <T> boolean equalsAssumeSameSize(RegistryAccess one, RegistryAccess two, RegistryOps<?> dynamicOpsOne, RegistryOps<?> dynamicOpsTwo,
         RegistryDataLoader.RegistryData<T> registryData) {
-        Optional<? extends Registry<T>> registryOne = one.lookup(registryData.key());
-        Optional<? extends Registry<T>> registryTwo = two.lookup(registryData.key());
+        Optional<? extends Registry<T>> registryOne = one.registry(registryData.key());
+        Optional<? extends Registry<T>> registryTwo = two.registry(registryData.key());
 
         if (registryOne.isEmpty() || registryTwo.isEmpty()) {
             return registryOne.isEmpty() && registryTwo.isEmpty();
@@ -102,16 +102,16 @@ public class RegistryHelper {
         }
 
         var resultOne = codec.encodeStart(dynamicOpsOne, one);
-        if (resultOne.isError()) {
+        if (resultOne.error().isPresent()) {
             return false;
         }
 
         var resultTwo = codec.encodeStart(dynamicOpsTwo, two);
-        if (resultTwo.isError()) {
+        if (resultTwo.error().isPresent()) {
             return false;
         }
 
-        return resultOne.getOrThrow().equals(resultTwo.getOrThrow());
+        return resultOne.result().equals(resultTwo.result());
     }
 
 }

@@ -8,7 +8,7 @@ import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.objects.Reference2IntMap;
 import it.unimi.dsi.fastutil.objects.Reference2IntOpenHashMap;
 import net.minecraft.core.RegistryAccess;
-import net.minecraft.network.RegistryFriendlyByteBuf;
+import com.moulberry.flashback.io.ReplayBuffer;
 
 import java.util.List;
 import java.util.Objects;
@@ -16,7 +16,7 @@ import java.util.Objects;
 public class ReplayWriter {
 
     private final ByteBuf dataBufferInner;
-    private RegistryFriendlyByteBuf dataBuffer;
+    private ReplayBuffer dataBuffer;
     private Reference2IntMap<Action> registeredActions;
     private Action writingAction = null;
 
@@ -32,7 +32,7 @@ public class ReplayWriter {
 
     public ReplayWriter(RegistryAccess registryAccess) {
         this.dataBufferInner = Unpooled.buffer();
-        this.dataBuffer = new RegistryFriendlyByteBuf(this.dataBufferInner, registryAccess);
+        this.dataBuffer = new ReplayBuffer(this.dataBufferInner, registryAccess);
         this.registryAccess = registryAccess;
         this.writeHeader();
     }
@@ -51,7 +51,7 @@ public class ReplayWriter {
         List<Action> actions = ActionRegistry.getActions();
         this.dataBuffer.writeVarInt(actions.size());
         for (Action action : actions) {
-            this.dataBuffer.writeIdentifier(action.name());
+            this.dataBuffer.writeResourceLocation(action.name());
             this.registeredActions.put(action, this.registeredActions.size());
         }
 
@@ -59,7 +59,7 @@ public class ReplayWriter {
     }
 
     public void setRegistryAccess(RegistryAccess registryAccess) {
-        RegistryFriendlyByteBuf newDataBuffer = new RegistryFriendlyByteBuf(this.dataBufferInner, registryAccess);
+        ReplayBuffer newDataBuffer = new ReplayBuffer(this.dataBufferInner, registryAccess);
         newDataBuffer.writerIndex(this.dataBuffer.writerIndex());
         newDataBuffer.readerIndex(this.dataBuffer.readerIndex());
         this.dataBuffer = newDataBuffer;
@@ -162,7 +162,7 @@ public class ReplayWriter {
         this.actionSizeWriterIndex = -1;
     }
 
-    public RegistryFriendlyByteBuf friendlyByteBuf() {
+    public ReplayBuffer friendlyByteBuf() {
         return this.dataBuffer;
     }
 

@@ -23,12 +23,11 @@ import com.moulberry.flashback.editor.ui.windows.VisualsWindow;
 import imgui.moulberry90.*;
 import imgui.moulberry90.flag.*;
 import imgui.moulberry90.internal.ImGuiContext;
-import net.fabricmc.loader.api.FabricLoader;
+import com.moulberry.flashback.platform.ForgePlatform;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.LevelLoadingScreen;
 import net.minecraft.client.gui.screens.LoadingOverlay;
 import net.minecraft.client.gui.screens.ProgressScreen;
-import net.minecraft.client.input.InputQuirks;
 import net.minecraft.client.multiplayer.MultiPlayerGameMode;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.resources.language.ClientLanguage;
@@ -46,8 +45,7 @@ import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector4f;
-import org.lwjgl.sdl.SDLKeyboard;
-import org.lwjgl.sdl.SDLScancode;
+import org.lwjgl.glfw.GLFW;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -59,7 +57,7 @@ import java.util.function.Predicate;
 
 public class ReplayUI {
 
-    public static final CustomImGuiWindower imguiWindower = new CustomImGuiWindowerSdl();
+    public static final CustomImGuiWindower imguiWindower = new CustomImGuiImplGlfw();
     public static final CustomImGuiImplB3D imguiRenderer = new CustomImGuiImplB3D();
     private static boolean initialized = false;
 
@@ -154,13 +152,13 @@ public class ReplayUI {
 
         imGuiIO = new ImGuiIO(ImGui.getIO().ptr);
 
-        Path relativePath = FabricLoader.getInstance().getGameDir().relativize(path);
+        Path relativePath = ForgePlatform.getInstance().getGameDir().relativize(path);
         imGuiIO.setIniFilename(relativePath.toString());
 
         imGuiIO.addConfigFlags(ImGuiConfigFlags.DockingEnable);
-        imGuiIO.setConfigMacOSXBehaviors(InputQuirks.REPLACE_CTRL_KEY_WITH_CMD_KEY);
+        imGuiIO.setConfigMacOSXBehaviors(Minecraft.ON_OSX);
 
-        imguiWindower.init(Minecraft.getInstance().getWindow().handle());
+        imguiWindower.init(Minecraft.getInstance().getWindow().getWindow());
         imguiRenderer.init();
 
         contentScale = imguiWindower.getContentScale();
@@ -229,12 +227,11 @@ public class ReplayUI {
         rangesBuilder.addChar('\u2193'); // Down Arrow
 
         // Make sure every printable key on the keyboard is present
-        for (int i = SDLScancode.SDL_SCANCODE_A; i < SDLScancode.SDL_SCANCODE_COUNT; i++) {
-            int keycode = SDLKeyboard.SDL_GetKeyFromScancode(i, (short)0, false);
-            if (keycode == 0) {
-                continue;
-            }
-            String key = SDLKeyboard.SDL_GetKeyName(keycode);
+        for (int i = GLFW.GLFW_KEY_SPACE; i <= GLFW.GLFW_KEY_LAST; i++) {
+            if (CustomImGuiImplGlfw.glfwKeyToImGuiKey(i) == ImGuiKey.None) continue;
+            int scancode = GLFW.glfwGetKeyScancode(i);
+            if (scancode < 0) continue;
+            String key = GLFW.glfwGetKeyName(i, scancode);
             if (key != null && !key.isEmpty()) {
                 rangesBuilder.addText(key);
                 rangesBuilder.addText(key.toLowerCase());
@@ -464,7 +461,7 @@ public class ReplayUI {
             return false;
         }
 
-        if (Minecraft.getInstance().gui.hud.isHidden()) {
+        if (Minecraft.getInstance().options.hideGui) {
             return false;
         }
 
@@ -473,7 +470,7 @@ public class ReplayUI {
         if (gameMode.getPlayerMode() != GameType.SPECTATOR) return false;
         if (Minecraft.getInstance().level == null) return false;
         if (Minecraft.getInstance().player == null) return false;
-        if (Minecraft.getInstance().gui.overlay() != null) return false;
+        if (Minecraft.getInstance().getOverlay() != null) return false;
         return true;
     }
 
@@ -500,7 +497,7 @@ public class ReplayUI {
         if (!activeLastFrame) {
             // Make sure the vanilla grab state is correct
             if (Minecraft.getInstance().gameMode != null) {
-                if (Minecraft.getInstance().gui.screen() == null) {
+                if (Minecraft.getInstance().screen == null) {
                     Minecraft.getInstance().mouseHandler.releaseMouse();
                     Minecraft.getInstance().mouseHandler.grabMouse();
                 } else {
@@ -511,7 +508,7 @@ public class ReplayUI {
             }
         } else {
             // Forcefully ungrab the cursor
-            InputConstants.releaseMouse(Minecraft.getInstance().getWindow(), ImGui.getMainViewport().getSizeX()/2f, ImGui.getMainViewport().getSizeY()/2f);
+            InputConstants.grabOrReleaseMouse(Minecraft.getInstance().getWindow().getWindow(), GLFW.GLFW_CURSOR_NORMAL, ImGui.getMainViewport().getSizeX()/2f, ImGui.getMainViewport().getSizeY()/2f);
         }
     }
 
@@ -522,7 +519,7 @@ public class ReplayUI {
     public static void drawOverlay() {
         compositeOnTop = null;
 
-        if (!initialized && Minecraft.getInstance().gui.overlay() instanceof LoadingOverlay) {
+        if (!initialized && Minecraft.getInstance().getOverlay() instanceof LoadingOverlay) {
             return;
         }
 
@@ -549,7 +546,7 @@ public class ReplayUI {
             throw new IllegalStateException("Tried to use EditorUI while it was not initialized");
         }
 
-        if (Minecraft.getInstance().gui.screen() instanceof ProgressScreen || Minecraft.getInstance().gui.screen() instanceof LevelLoadingScreen) {
+        if (Minecraft.getInstance().screen instanceof ProgressScreen || Minecraft.getInstance().screen instanceof LevelLoadingScreen) {
             return;
         }
 
@@ -713,7 +710,7 @@ public class ReplayUI {
                 frameHeight = Minecraft.getInstance().getWindow().getScreenHeight();
             }
 
-            if (Minecraft.getInstance().gui.screen() == null && Minecraft.getInstance().gui.overlay() == null) {
+            if (Minecraft.getInstance().screen == null && Minecraft.getInstance().getOverlay() == null) {
                 if (editorState != null && editorState.replayVisuals.ruleOfThirdsGuide) {
                     ImDrawList drawList = ImGui.getBackgroundDrawList();
                     drawList.removeFlags(ImDrawListFlags.AntiAliasedLines);
@@ -837,7 +834,7 @@ public class ReplayUI {
             if (ImGui.isWindowHovered() && ReplayUI.getIO().getMousePosY() > ImGui.getWindowPosY()) {
                 isFrameHovered = true;
 
-                if (Minecraft.getInstance().gui.screen() != null) {
+                if (Minecraft.getInstance().screen != null) {
                     ImGui.setNextFrameWantCaptureMouse(false);
                 } else {
                     boolean isMovingCamera = isMovingCamera();
@@ -975,7 +972,7 @@ public class ReplayUI {
         EditorState editorState = EditorStateManager.getCurrent();
 
         if (editorState == null || editorState.replayVisuals.renderBlocks) {
-            ClipContext clipContext = new ClipContext(from, to, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, CollisionContext.empty());
+            ClipContext clipContext = new ClipContext(from, to, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, Minecraft.getInstance().getCameraEntity());
             blockResult = Minecraft.getInstance().level.clip(clipContext);
 
             if (blockResult.getType() != HitResult.Type.MISS) {
@@ -1024,11 +1021,16 @@ public class ReplayUI {
     }
 
     public static boolean isMoveQuickDown() {
-        return ImGui.isKeyDown(Minecraft.getInstance().options.keySprint.key.getValue());
+        InputConstants.Key key = Minecraft.getInstance().options.keySprint.key;
+        if (key.getType() == InputConstants.Type.MOUSE) return ImGui.isMouseDown(key.getValue());
+        int imguiKey = key.getType() == InputConstants.Type.SCANCODE
+            ? com.moulberry.flashback.utils.InputHelper.glfwScancodeToImguiKey(key.getValue())
+            : CustomImGuiImplGlfw.glfwKeyToImGuiKey(key.getValue());
+        return imguiKey != ImGuiKey.None && ImGui.isKeyDown(imguiKey);
     }
 
     public static boolean isCtrlOrCmdDown() {
-        return InputQuirks.REPLACE_CTRL_KEY_WITH_CMD_KEY ? ReplayUI.getIO().getKeySuper() : ReplayUI.getIO().getKeyCtrl();
+        return Minecraft.ON_OSX ? ReplayUI.getIO().getKeySuper() : ReplayUI.getIO().getKeyCtrl();
     }
 
 }

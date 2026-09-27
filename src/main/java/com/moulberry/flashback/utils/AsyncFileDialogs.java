@@ -1,155 +1,106 @@
 package com.moulberry.flashback.utils;
 
 import com.moulberry.flashback.Flashback;
+import net.minecraft.Util;
 import net.minecraft.client.Minecraft;
-import org.lwjgl.sdl.SDLDialog;
-import org.lwjgl.sdl.SDLError;
-import org.lwjgl.sdl.SDL_DialogFileFilter;
-import org.lwjgl.system.MemoryUtil;
+import org.lwjgl.PointerBuffer;
+import org.lwjgl.system.MemoryStack;
+import org.lwjgl.util.nfd.NFDFilterItem;
+import org.lwjgl.util.nfd.NativeFileDialog;
 
-import java.nio.ByteBuffer;
+import java.nio.file.Path;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-public class AsyncFileDialogs {
+/** Native dialogs use GLFW's UI thread on macOS and a dedicated worker elsewhere. */
+public final class AsyncFileDialogs {
+    private static final ExecutorService DIALOG_THREAD = Executors.newSingleThreadExecutor(new NamedDaemonThreadFactory("FlashbackFileDialogs"));
+    private static volatile CompletableFuture<String> currentSaveOrOpenFileDialog;
 
-    private static CompletableFuture<String> currentSaveOrOpenFileDialog = null;
+    public static boolean hasDialog() { return currentSaveOrOpenFileDialog != null; }
 
-    public static boolean hasDialog() {
-        return currentSaveOrOpenFileDialog != null;
+    public static CompletableFuture<String> saveFileDialog(String path, String name, String description, String... filters) {
+        return show(0, path, name, description, filters);
     }
 
-    private record FileFilter(SDL_DialogFileFilter.Buffer buffer, ByteBuffer encodedFilterDescription, ByteBuffer encodedFilter) {
-        private void free() {
-            this.buffer.free();
-            MemoryUtil.memFree(this.encodedFilterDescription);
-            MemoryUtil.memFree(this.encodedFilter);
-        }
+    public static CompletableFuture<String> openFileDialog(String path, String description, String... filters) {
+        return show(1, path, null, description, filters);
     }
 
-    private static FileFilter createFilterBuffer(String filterDescription, String... filters) {
-        StringBuilder filterBuilder = new StringBuilder();
-
-        for (String filter : filters) {
-            if (!filterBuilder.isEmpty()) filterBuilder.append(";");
-            filterBuilder.append(filter(filter));
-        }
-
-        SDL_DialogFileFilter.Buffer fileFilter = SDL_DialogFileFilter.calloc(1);
-        ByteBuffer encodedFilterDescription = MemoryUtil.memUTF8(filter(filterDescription), true);
-        ByteBuffer encodedFilter = MemoryUtil.memUTF8(filter(filterBuilder.toString()), true);
-        fileFilter.get(0)
-                  .name(encodedFilterDescription)
-                  .pattern(encodedFilter);
-
-        return new FileFilter(fileFilter, encodedFilterDescription, encodedFilter);
+    public static CompletableFuture<String> openFolderDialog(String path) {
+        return show(2, path, null, null);
     }
 
-    public static CompletableFuture<String> saveFileDialog(String defaultPath, String defaultName, String filterDescription, String... filters) {
+    private static synchronized CompletableFuture<String> show(int kind, String path, String name, String description, String... filters) {
         if (hasDialog()) return CompletableFuture.completedFuture(null);
-
-        currentSaveOrOpenFileDialog = new CompletableFuture<>();
-        CompletableFuture<String> future = currentSaveOrOpenFileDialog;
-
-        String defaultLocation = filter(defaultPath + "/" + defaultName);
-
-        var fileFilter = createFilterBuffer(filterDescription, filters);
-        String autoExtension = filters.length == 1 ? filters[0] : null;
-
-        long window = Minecraft.getInstance().getWindow().handle();
-        SDLDialog.SDL_ShowSaveFileDialog((userdata, filelist, selectedFilter) -> {
-            fileFilter.free();
-
-            if (future == currentSaveOrOpenFileDialog) {
-                currentSaveOrOpenFileDialog = null;
+        CompletableFuture<String> future = new CompletableFuture<>();
+        currentSaveOrOpenFileDialog = future;
+        Runnable dialog = () -> {
+            String selected = null;
+            boolean initialized = false;
+            try (MemoryStack stack = MemoryStack.stackPush()) {
+                if (NativeFileDialog.NFD_Init() != NativeFileDialog.NFD_OKAY) {
+                    throw new IllegalStateException(NativeFileDialog.NFD_GetError());
+                }
+                initialized = true;
+                PointerBuffer out = stack.callocPointer(1);
+                NFDFilterItem.Buffer nativeFilters = null;
+                if (filters.length > 0) {
+                    nativeFilters = NFDFilterItem.calloc(1, stack);
+                    nativeFilters.get(0).name(stack.UTF8(filter(description))).spec(stack.UTF8(filter(String.join(",", filters))));
+                }
+                int result = switch (kind) {
+                    case 0 -> NativeFileDialog.NFD_SaveDialog(out, nativeFilters, filter(path), filter(name));
+                    case 1 -> NativeFileDialog.NFD_OpenDialog(out, nativeFilters, filter(path));
+                    default -> NativeFileDialog.NFD_PickFolder(out, filter(path));
+                };
+                if (result == NativeFileDialog.NFD_OKAY) {
+                    try {
+                        selected = out.getStringUTF8(0);
+                    } finally {
+                        NativeFileDialog.NFD_FreePath(out.get(0));
+                    }
+                    if (kind == 0 && filters.length == 1 && !Path.of(selected).getFileName().toString().contains(".")) {
+                        selected += "." + filters[0];
+                    }
+                } else if (result == NativeFileDialog.NFD_ERROR) {
+                    Flashback.LOGGER.error("Native file dialog failed: {}", NativeFileDialog.NFD_GetError());
+                }
+            } catch (Throwable error) {
+                Flashback.LOGGER.error("Native file dialog failed", error);
+            } finally {
+                try {
+                    if (initialized) NativeFileDialog.NFD_Quit();
+                } finally {
+                    completeOnClient(Minecraft.getInstance(), future, selected);
+                }
             }
-
-            if (filelist == MemoryUtil.NULL) {
-                Flashback.LOGGER.error("Error occurred during save file dialog: {}", SDLError.SDL_GetError());
-                future.complete(null);
-                return;
-            }
-
-            long filePtr = MemoryUtil.memGetAddress(filelist);
-            String result = MemoryUtil.memUTF8Safe(filePtr);
-            if (result != null && autoExtension != null && result.indexOf('.') < 0) {
-                result = result + "." + autoExtension;
-            }
-            future.complete(result);
-        }, 0, window, fileFilter.buffer(), defaultLocation);
-
+        };
+        if (Util.getPlatform() == Util.OS.OSX) Minecraft.getInstance().execute(dialog);
+        else DIALOG_THREAD.execute(dialog);
         return future;
     }
 
-    public static CompletableFuture<String> openFileDialog(String defaultPath, String filterDescription, String... filters) {
-        if (hasDialog()) return CompletableFuture.completedFuture(null);
-
-        currentSaveOrOpenFileDialog = new CompletableFuture<>();
-        CompletableFuture<String> future = currentSaveOrOpenFileDialog;
-
-        var fileFilter = createFilterBuffer(filterDescription, filters);
-
-        long window = Minecraft.getInstance().getWindow().handle();
-        SDLDialog.SDL_ShowOpenFileDialog((userdata, filelist, selectedFilter) -> {
-            fileFilter.free();
-
-            if (future == currentSaveOrOpenFileDialog) {
-                currentSaveOrOpenFileDialog = null;
-            }
-
-            if (filelist == MemoryUtil.NULL) {
-                Flashback.LOGGER.error("Error occurred during open file dialog: {}", SDLError.SDL_GetError());
-                future.complete(null);
-                return;
-            }
-
-            long filePtr = MemoryUtil.memGetAddress(filelist);
-            future.complete(MemoryUtil.memUTF8Safe(filePtr));
-        }, 0, window, fileFilter.buffer(), filter(defaultPath), false);
-
-        return future;
-    }
-
-
-    public static CompletableFuture<String> openFolderDialog(String defaultPath) {
-        if (hasDialog()) return CompletableFuture.completedFuture(null);
-
-        currentSaveOrOpenFileDialog = new CompletableFuture<>();
-        CompletableFuture<String> future = currentSaveOrOpenFileDialog;
-
-        long window = Minecraft.getInstance().getWindow().handle();
-        SDLDialog.SDL_ShowOpenFolderDialog((userdata, filelist, selectedFilter) -> {
-            if (future == currentSaveOrOpenFileDialog) {
-                currentSaveOrOpenFileDialog = null;
-            }
-
-            if (filelist == MemoryUtil.NULL) {
-                Flashback.LOGGER.error("Error occurred during open folder dialog: {}", SDLError.SDL_GetError());
-                future.complete(null);
-                return;
-            }
-
-            long filePtr = MemoryUtil.memGetAddress(filelist);
-            future.complete(MemoryUtil.memUTF8Safe(filePtr));
-        }, 0, window, filter(defaultPath), false);
-
-        return future;
+    /** Publish selection/cancellation only after returning to the client event loop. */
+    static void completeOnClient(Executor client, CompletableFuture<String> future, String selected) {
+        client.execute(() -> {
+            if (currentSaveOrOpenFileDialog == future) currentSaveOrOpenFileDialog = null;
+            future.complete(selected);
+        });
     }
 
     public static String filter(CharSequence in) {
-        return filterLT20(in.toString()
-                .replace("'", "")
-                .replace("\"", "")
-                .replace("$", "")
-                .replace("`", ""));
+        return in == null ? "" : filterLT20(in);
     }
 
     public static String filterLT20(CharSequence in) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < in.length(); i++) {
+        StringBuilder result = new StringBuilder();
+        for (int i=0; i<in.length(); i++) {
             char c = in.charAt(i);
-            if (c >= 32 || c == '\n') builder.append(c);
+            if (c >= 32 || c == '\n') result.append(c);
         }
-        return builder.toString();
+        return result.toString();
     }
-
 }

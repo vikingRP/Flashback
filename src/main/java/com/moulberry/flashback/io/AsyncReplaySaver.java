@@ -17,22 +17,18 @@ import io.netty.buffer.Unpooled;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
-import net.fabricmc.fabric.api.networking.v1.context.PacketContext;
-import net.fabricmc.fabric.api.networking.v1.context.PacketContextProvider;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.ByteBufCodecs;
-import net.minecraft.network.codec.StreamCodec;
+import com.moulberry.flashback.io.ReplayBuffer;
+import com.moulberry.flashback.packet.PacketCodec;
 import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
-import net.minecraft.network.protocol.configuration.ClientConfigurationPacketListener;
+import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
 import net.minecraft.network.protocol.game.ClientboundLoginPacket;
-import net.minecraft.util.Util;
+import net.minecraft.Util;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -79,12 +75,7 @@ public class AsyncReplaySaver {
                         }
                     }
 
-                    var context = PacketContext.get();
-                    if (context == null && Minecraft.getInstance().player instanceof PacketContextProvider provider) {
-                        PacketContext.runWithContext(provider, () -> task.accept(replayWriter));
-                    } else {
-                        task.accept(replayWriter);
-                    }
+                    task.accept(replayWriter);
                 } catch (Throwable t) {
                     this.error.set(t);
                     this.hasStopped.set(true);
@@ -112,11 +103,11 @@ public class AsyncReplaySaver {
     private final Long2ObjectOpenHashMap<List<CachedChunkPacket>> cachedChunkPackets = new Long2ObjectOpenHashMap<>();
     private int totalWrittenChunkPackets = 0;
 
-    public void writeGamePackets(StreamCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec,
+    public void writeGamePackets(PacketCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec,
                                  List<Packet<? super ClientGamePacketListener>> packets) {
         List<Packet<? super ClientGamePacketListener>> packetCopy = new ArrayList<>(packets);
         this.submit(writer -> {
-            RegistryFriendlyByteBuf chunkCacheOutput = null;
+            ReplayBuffer chunkCacheOutput = null;
             int lastChunkCacheIndex = -1;
 
             FriendlyByteBuf customPayloadTempBuffer = null;
@@ -151,7 +142,7 @@ public class AsyncReplaySaver {
 
                         // Create new chunk cache output buffer if necessary
                         if (chunkCacheOutput == null) {
-                            chunkCacheOutput = new RegistryFriendlyByteBuf(Unpooled.buffer(), writer.registryAccess());
+                            chunkCacheOutput = new ReplayBuffer(Unpooled.buffer(), writer.registryAccess());
                         }
 
                         // Write placeholder value for size
@@ -188,7 +179,7 @@ public class AsyncReplaySaver {
                         // attempts to encode the packet before starting the action
                         try {
                             if (customPayloadTempBuffer == null) {
-                                customPayloadTempBuffer = new RegistryFriendlyByteBuf(Unpooled.buffer(), writer.registryAccess());
+                                customPayloadTempBuffer = new ReplayBuffer(Unpooled.buffer(), writer.registryAccess());
                             }
 
                             customPayloadTempBuffer.clear();
@@ -214,7 +205,7 @@ public class AsyncReplaySaver {
         });
     }
 
-    private void writeChunkCacheFile(RegistryFriendlyByteBuf chunkCacheOutput, int index) {
+    private void writeChunkCacheFile(ReplayBuffer chunkCacheOutput, int index) {
         if (chunkCacheOutput == null || chunkCacheOutput.writerIndex() == 0) {
             return;
         }
@@ -239,17 +230,7 @@ public class AsyncReplaySaver {
         }
     }
 
-    public void writeConfigurationPackets(StreamCodec<ByteBuf, Packet<? super ClientConfigurationPacketListener>> configurationPacketCodec,
-                                 List<Packet<? super ClientConfigurationPacketListener>> packets) {
-        List<Packet<? super ClientConfigurationPacketListener>> packetCopy = new ArrayList<>(packets);
-        this.submit(writer -> {
-            for (Packet<? super ClientConfigurationPacketListener> packet : packetCopy) {
-                writer.startAction(ActionConfigurationPacket.INSTANCE);
-                configurationPacketCodec.encode(writer.friendlyByteBuf(), packet);
-                writer.finishAction(ActionConfigurationPacket.INSTANCE);
-            }
-        });
-    }
+
 
     public void writeIcon(NativeImage nativeImage) {
         int width = nativeImage.getWidth();

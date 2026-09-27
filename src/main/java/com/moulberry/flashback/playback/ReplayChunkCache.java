@@ -9,8 +9,8 @@ import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.ints.IntOpenHashSet;
 import it.unimi.dsi.fastutil.ints.IntSet;
 import net.minecraft.core.RegistryAccess;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
+import com.moulberry.flashback.io.ReplayBuffer;
+import com.moulberry.flashback.packet.PacketCodec;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
@@ -42,7 +42,7 @@ public class ReplayChunkCache {
     }
 
     @Nullable
-    public ClientboundLevelChunkWithLightPacket getOrLoad(int index, RegistryAccess registryAccess, StreamCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec) {
+    public ClientboundLevelChunkWithLightPacket getOrLoad(int index, RegistryAccess registryAccess, PacketCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec) {
         int cacheIndex = index / CHUNK_CACHE_SIZE;
         SoftReference<List<ClientboundLevelChunkWithLightPacket>> packetListReference = this.levelChunkCachedPackets.get(cacheIndex);
         List<ClientboundLevelChunkWithLightPacket> packets = packetListReference == null ? null : packetListReference.get();
@@ -72,7 +72,7 @@ public class ReplayChunkCache {
         return indexInCache < packets.size() ? packets.get(indexInCache) : null;
     }
 
-    private static List<ClientboundLevelChunkWithLightPacket> loadLevelChunkCache(Path levelChunkCachePath, RegistryAccess registryAccess, StreamCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec) throws IOException {
+    private static List<ClientboundLevelChunkWithLightPacket> loadLevelChunkCache(Path levelChunkCachePath, RegistryAccess registryAccess, PacketCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec) throws IOException {
         List<ClientboundLevelChunkWithLightPacket> packets = new ArrayList<>();
 
         try (InputStream is = Files.newInputStream(levelChunkCachePath)) {
@@ -94,7 +94,7 @@ public class ReplayChunkCache {
                     break;
                 }
 
-                RegistryFriendlyByteBuf registryFriendlyByteBuf = new RegistryFriendlyByteBuf(Unpooled.wrappedBuffer(chunk), registryAccess);
+                ReplayBuffer registryFriendlyByteBuf = new ReplayBuffer(Unpooled.wrappedBuffer(chunk), registryAccess);
 
                 try {
                     Packet<?> packet = gamePacketCodec.decode(registryFriendlyByteBuf);

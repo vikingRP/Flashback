@@ -10,7 +10,6 @@ import net.minecraft.network.ConnectionProtocol;
 import net.minecraft.network.PacketListener;
 import net.minecraft.network.PacketSendListener;
 import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.configuration.ClientConfigurationPacketListener;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import org.jetbrains.annotations.Nullable;
 import org.spongepowered.asm.mixin.Mixin;
@@ -36,14 +35,23 @@ public class MixinConnection implements ConnectionExt {
         if (recorder != null) {
             if (packetListener instanceof ClientGamePacketListener) {
                 recorder.writePacketAsync(packet, ConnectionProtocol.PLAY);
-            } else if (packetListener instanceof ClientConfigurationPacketListener) {
-                recorder.writePacketAsync(packet, ConnectionProtocol.CONFIGURATION);
             }
         }
     }
 
-    @Inject(method = "send(Lnet/minecraft/network/protocol/Packet;Lio/netty/channel/ChannelFutureListener;Z)V", at = @At("HEAD"), cancellable = true)
-    public void send(Packet<?> packet, @Nullable ChannelFutureListener channelFutureListener, boolean bl, CallbackInfo ci) {
+    @Inject(method = "exceptionCaught", at = @At("HEAD"))
+    private void reportReplayNetworkFailure(io.netty.channel.ChannelHandlerContext context, Throwable failure, CallbackInfo ci) {
+        if (Flashback.isInReplay()) {
+            Connection connection = (Connection)(Object)this;
+            PacketListener listener = connection.getPacketListener();
+            Flashback.LOGGER.error("Replay connection failed: protocol={}, listener={}, channel={}",
+                context.channel().attr(Connection.ATTRIBUTE_PROTOCOL).get(),
+                listener == null ? "none" : listener.getClass().getName(), context.channel().getClass().getName(), failure);
+        }
+    }
+
+    @Inject(method = "send(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketSendListener;)V", at = @At("HEAD"), cancellable = true)
+    public void send(Packet<?> packet, @Nullable PacketSendListener listener, CallbackInfo ci) {
         if (this.filterUnnecessaryPackets && IgnoredPacketSet.isIgnoredInReplay(packet)) {
             ci.cancel();
         }

@@ -1,21 +1,23 @@
 package com.moulberry.flashback.compat;
 
-import de.johni0702.minecraft.bobby.FakeChunkManager;
-import de.johni0702.minecraft.bobby.ext.ClientChunkCacheExt;
+import com.moulberry.flashback.Flashback;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.client.multiplayer.ClientChunkCache;
 import net.minecraft.world.level.chunk.LevelChunk;
-
 import java.util.List;
 
-public class BobbyUtil {
-    public static void addBobbyChunks(ClientChunkCache clientChunkCache, List<LevelChunk> chunks, LongOpenHashSet seenChunkPositions) {
-        FakeChunkManager bobbyChunkCache = ((ClientChunkCacheExt)clientChunkCache).bobby_getFakeChunkManager();
-        if (bobbyChunkCache == null) return;
-        for (var chunk : bobbyChunkCache.getFakeChunks()) {
-            if (seenChunkPositions.add(chunk.getPos().pack())) {
-                chunks.add(chunk);
+/** Optional Bobby bridge; Forge does not ship Bobby or its Fabric classes. */
+public final class BobbyUtil {
+    public static void addBobbyChunks(ClientChunkCache cache, List<LevelChunk> chunks, LongOpenHashSet seen) {
+        try {
+            Object manager = cache.getClass().getMethod("bobby_getFakeChunkManager").invoke(cache);
+            if (manager == null) return;
+            Iterable<?> fakeChunks = (Iterable<?>) manager.getClass().getMethod("getFakeChunks").invoke(manager);
+            for (Object candidate : fakeChunks) {
+                if (candidate instanceof LevelChunk chunk && seen.add(chunk.getPos().toLong())) chunks.add(chunk);
             }
+        } catch (ReflectiveOperationException | ClassCastException error) {
+            throw new IllegalStateException("Installed Bobby version is incompatible with Flashback chunk capture", error);
         }
     }
 }

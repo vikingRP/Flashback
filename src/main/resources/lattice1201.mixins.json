@@ -1,0 +1,24 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "refmap": "flashback.refmap.json",
+  "package": "com.moulberry.lattice.mixin.v1201",
+  "compatibilityLevel": "JAVA_17",
+  "client": [
+    "GuiEventListenerMixins$MixinLatticeConfigScreen",
+    "GuiEventListenerMixins$MixinAbstractWidgets",
+    "GuiEventListenerMixins$MixinDropdownWidget",
+    "GuiEventListenerMixins$MixinEditableSlider",
+    "MixinDropdownWidget",
+    "MixinLatticeConfigScreen",
+    "MixinWidgetWithText",
+    "multiversion.MixinDrawString",
+    "multiversion.MixinMouseScrolled",
+    "multiversion.MixinNewMultiLineEditBox",
+    "multiversion.MixinOffsetZ",
+    "multiversion.MixinGetWindowHandle"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

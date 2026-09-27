@@ -1,0 +1,37 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="All Rights Reserved"
+issueTrackerURL="https://github.com/vikingRP/Flashback/issues"
+clientSideOnly=true
+
+[[mods]]
+modId="flashback"
+version="${version}"
+displayName="Flashback"
+displayURL="https://flashback.moulberry.com/"
+logoFile="assets/flashback/icon.png"
+authors="Moulberry"
+displayTest="IGNORE_ALL_VERSION"
+description='''Record your gameplay, view the recordings and export cinematic shots.'''
+
+[[dependencies.flashback]]
+modId="forge"
+mandatory=true
+versionRange="${forge_version_range}"
+ordering="NONE"
+side="CLIENT"
+
+[[dependencies.flashback]]
+modId="minecraft"
+mandatory=true
+versionRange="${minecraft_version_range}"
+ordering="NONE"
+side="CLIENT"
+
+# The Simple Voice Chat integration uses internal API added in 2.6.24
+[[dependencies.flashback]]
+modId="voicechat_api"
+mandatory=false
+versionRange="[2.6.24,)"
+ordering="NONE"
+side="CLIENT"

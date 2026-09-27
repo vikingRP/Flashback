@@ -3,25 +3,24 @@ package com.moulberry.flashback.packet;
 import com.moulberry.flashback.Flashback;
 import com.moulberry.flashback.action.PositionAndAngle;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.moulberry.flashback.packet.PacketCodec;
+import com.moulberry.flashback.packet.FlashbackPayload;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.List;
 
-public record FlashbackAccurateEntityPosition(int entityId, List<PositionAndAngle> positionAndAngles) implements CustomPacketPayload {
+public record FlashbackAccurateEntityPosition(int entityId, List<PositionAndAngle> positionAndAngles) implements FlashbackPayload {
     public static final Type<FlashbackAccurateEntityPosition> TYPE = new Type<>(Flashback.createIdentifier("accurate_entity_position"));
 
-    public static final StreamCodec<FriendlyByteBuf, FlashbackAccurateEntityPosition> STREAM_CODEC = new AccurateEntityPositionStreamCodec();
+    public static final PacketCodec<FriendlyByteBuf, FlashbackAccurateEntityPosition> STREAM_CODEC = new AccurateEntityPositionPacketCodec();
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
+    public Type<? extends FlashbackPayload> type() {
         return TYPE;
     }
 
-    public static class AccurateEntityPositionStreamCodec implements StreamCodec<FriendlyByteBuf, FlashbackAccurateEntityPosition> {
+    public static class AccurateEntityPositionPacketCodec implements PacketCodec<FriendlyByteBuf, FlashbackAccurateEntityPosition> {
         @Override
         public FlashbackAccurateEntityPosition decode(FriendlyByteBuf friendlyByteBuf) {
             int entityId = friendlyByteBuf.readVarInt();

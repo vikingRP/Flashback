@@ -2,20 +2,20 @@ package com.moulberry.flashback.packet;
 
 import com.moulberry.flashback.Flashback;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.moulberry.flashback.packet.PacketCodec;
+import com.moulberry.flashback.packet.FlashbackPayload;
 
-public record FlashbackRemoteExperience(int entityId, float experienceProgress, int totalExperience, int experienceLevel) implements CustomPacketPayload {
+public record FlashbackRemoteExperience(int entityId, float experienceProgress, int totalExperience, int experienceLevel) implements FlashbackPayload {
     public static final Type<FlashbackRemoteExperience> TYPE = new Type<>(Flashback.createIdentifier("remote_experience"));
 
-    public static final StreamCodec<FriendlyByteBuf, FlashbackRemoteExperience> STREAM_CODEC = new FlashbackRemoteExperienceStreamCodec();
+    public static final PacketCodec<FriendlyByteBuf, FlashbackRemoteExperience> STREAM_CODEC = new FlashbackRemoteExperiencePacketCodec();
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
+    public Type<? extends FlashbackPayload> type() {
         return TYPE;
     }
 
-    public static class FlashbackRemoteExperienceStreamCodec implements StreamCodec<FriendlyByteBuf, FlashbackRemoteExperience> {
+    public static class FlashbackRemoteExperiencePacketCodec implements PacketCodec<FriendlyByteBuf, FlashbackRemoteExperience> {
         @Override
         public FlashbackRemoteExperience decode(FriendlyByteBuf friendlyByteBuf) {
             int entityId = friendlyByteBuf.readVarInt();

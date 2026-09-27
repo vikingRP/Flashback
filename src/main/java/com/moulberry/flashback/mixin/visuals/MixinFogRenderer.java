@@ -1,44 +1,36 @@
 package com.moulberry.flashback.mixin.visuals;
 
-import com.llamalad7.mixinextras.injector.ModifyReturnValue;
-import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
-import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
-import com.llamalad7.mixinextras.sugar.Local;
-import com.moulberry.flashback.state.EditorState;
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.moulberry.flashback.state.EditorStateManager;
-import com.moulberry.flashback.visuals.ReplayVisuals;
-import net.minecraft.client.renderer.fog.FogData;
-import net.minecraft.client.renderer.fog.FogRenderer;
-import org.joml.Vector4f;
+import net.minecraft.client.renderer.FogRenderer;
 import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
-import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-import java.nio.ByteBuffer;
-
-@Mixin(value = FogRenderer.class, priority = 900) // Priority 900 so we inject before Sodium
+@Mixin(value = FogRenderer.class, priority = 900)
 public class MixinFogRenderer {
+    @Shadow private static float fogRed;
+    @Shadow private static float fogGreen;
+    @Shadow private static float fogBlue;
 
-    @ModifyReturnValue(method = "setupFog", at = @At("RETURN"))
-    public FogData setupFog(FogData fogData) {
-        EditorState editorState = EditorStateManager.getCurrent();
-        if (editorState != null) {
-            ReplayVisuals visuals = editorState.replayVisuals;
-            if (visuals.overrideFog) {
-                fogData.environmentalStart = visuals.overrideFogStart;
-                fogData.environmentalEnd = visuals.overrideFogEnd;
-                fogData.renderDistanceStart = visuals.overrideFogStart;
-                fogData.renderDistanceEnd = visuals.overrideFogEnd;
-                fogData.skyEnd = visuals.overrideFogEnd;
-                fogData.cloudEnd = visuals.overrideFogEnd;
-            }
-            if (visuals.overrideFogColour) {
-                float[] fogColour = visuals.fogColour;
-                fogData.color.set(fogColour[0], fogColour[1], fogColour[2], 1.0F);
-            }
+    @Inject(method = "setupFog", at = @At("RETURN"))
+    private static void flashback$fogDistance(CallbackInfo ci) {
+        var state = EditorStateManager.getCurrent();
+        if (state != null && state.replayVisuals.overrideFog) {
+            RenderSystem.setShaderFogStart(state.replayVisuals.overrideFogStart);
+            RenderSystem.setShaderFogEnd(state.replayVisuals.overrideFogEnd);
         }
-        return fogData;
     }
 
+    @Inject(method = "setupColor", at = @At("RETURN"))
+    private static void flashback$fogColour(CallbackInfo ci) {
+        var state = EditorStateManager.getCurrent();
+        if (state != null && state.replayVisuals.overrideFogColour) {
+            var colour = state.replayVisuals.fogColour;
+            fogRed = colour[0]; fogGreen = colour[1]; fogBlue = colour[2];
+            RenderSystem.clearColor(fogRed, fogGreen, fogBlue, 0);
+        }
+    }
 }

@@ -10,11 +10,9 @@ import com.moulberry.lattice.keybind.LatticeInputType;
 import imgui.moulberry90.ImGuiIO;
 import imgui.moulberry90.flag.ImGuiKey;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.input.InputQuirks;
-import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
-import net.minecraft.util.Util;
+import net.minecraft.Util;
 
 import java.util.Collection;
 import java.util.List;
@@ -189,11 +187,9 @@ public class Keybind implements KeybindInterface {
             return I18n.get("flashback.keymod.scroll");
         }
 
-        //#if MC>=12109
-        return InputConstants.getKey(new KeyEvent(key, -1, 0)).getDisplayName().getString();
-        //#else
-        //$$ return InputConstants.getKey(key, -1).getDisplayName().getString();
-        //#endif
+        int glfwKey = InputHelper.imguiKeyToGlfw(key);
+        if (glfwKey == org.lwjgl.glfw.GLFW.GLFW_KEY_UNKNOWN) return I18n.get("key.keyboard.unknown");
+        return InputConstants.Type.KEYSYM.getOrCreate(glfwKey).getDisplayName().getString();
     }
 
     public String longKeyIdentifier() {
@@ -212,7 +208,7 @@ public class Keybind implements KeybindInterface {
         StringBuilder builder = new StringBuilder();
         if (this.shiftMod) builder.append(I18n.get("flashback.keymod.shift")).append("+");
         if (this.ctrlMod) {
-            if (InputQuirks.REPLACE_CTRL_KEY_WITH_CMD_KEY) {
+            if (Minecraft.ON_OSX) {
                 builder.append(I18n.get("flashback.keymod.mac_cmd")).append("+");
             } else {
                 builder.append(I18n.get("flashback.keymod.ctrl")).append("+");
@@ -220,7 +216,7 @@ public class Keybind implements KeybindInterface {
         }
         if (this.altMod) builder.append(I18n.get("flashback.keymod.alt")).append("+");
         if (this.superMod) {
-            if (InputQuirks.REPLACE_CTRL_KEY_WITH_CMD_KEY) {
+            if (Minecraft.ON_OSX) {
                 builder.append(I18n.get("flashback.keymod.ctrl")).append("+");
             } else if (Util.getPlatform() == Util.OS.WINDOWS) {
                 builder.append(I18n.get("flashback.keymod.win_super")).append("+");
@@ -238,9 +234,9 @@ public class Keybind implements KeybindInterface {
         if (this.key != key) return false;
 
         if (this.shiftMod != shiftMod) return false;
-        if (this.ctrlMod != (InputQuirks.REPLACE_CTRL_KEY_WITH_CMD_KEY ? superMod : ctrlMod)) return false;
+        if (this.ctrlMod != (Minecraft.ON_OSX ? superMod : ctrlMod)) return false;
         if (this.altMod != altMod) return false;
-        if (this.superMod != (InputQuirks.REPLACE_CTRL_KEY_WITH_CMD_KEY ? ctrlMod : superMod)) return false;
+        if (this.superMod != (Minecraft.ON_OSX ? ctrlMod : superMod)) return false;
 
         return true;
     }
@@ -313,7 +309,7 @@ public class Keybind implements KeybindInterface {
         boolean ctrlMod = this.ctrlMod;
         boolean superMod = this.superMod;
 
-        if (InputQuirks.REPLACE_CTRL_KEY_WITH_CMD_KEY) {
+        if (Minecraft.ON_OSX) {
             ctrlMod = this.superMod;
             superMod = this.ctrlMod;
         }
@@ -353,20 +349,18 @@ public class Keybind implements KeybindInterface {
     public void setKey(LatticeInputType type, int value, boolean shiftMod, boolean ctrlMod, boolean altMod, boolean superMod) {
         int oldKey = this.key;
         switch (type) {
-            case KEYSYM -> {
-                return;
-            }
+            case KEYSYM -> { this.key = com.moulberry.flashback.editor.ui.CustomImGuiImplGlfw.glfwKeyToImGuiKey(value); }
             case SCANCODE -> {
-                this.key = InputHelper.sdlScancodeToImguiKey(value);
+                this.key = InputHelper.glfwScancodeToImguiKey(value);
             }
             case MOUSE -> {
-                this.key = -InputHelper.sdlMouseToImguiMouse(value)-1;
+                this.key = -value-1;
             }
         }
         this.shiftMod = shiftMod;
-        this.ctrlMod = InputQuirks.REPLACE_CTRL_KEY_WITH_CMD_KEY ? superMod : ctrlMod;
+        this.ctrlMod = Minecraft.ON_OSX ? superMod : ctrlMod;
         this.altMod = altMod;
-        this.superMod = InputQuirks.REPLACE_CTRL_KEY_WITH_CMD_KEY ? ctrlMod : superMod;
+        this.superMod = Minecraft.ON_OSX ? ctrlMod : superMod;
         Keybinds.updateMapping(this, oldKey);
     }
 

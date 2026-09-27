@@ -21,8 +21,8 @@ import com.moulberry.flashback.utils.AsyncFileDialogs;
 import imgui.moulberry90.ImGui;
 import imgui.moulberry90.flag.ImGuiWindowFlags;
 import imgui.moulberry90.type.ImString;
-import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.util.FileUtil;
+import com.moulberry.flashback.platform.ForgePlatform;
+import net.minecraft.FileUtil;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.resources.language.I18n;
@@ -69,7 +69,7 @@ public class StartExportWindow {
         if (open) {
             installedIncompatibleModsString = null;
             for (String potentialIncompatibleMod : potentialIncompatibleMods) {
-                if (FabricLoader.getInstance().isModLoaded(potentialIncompatibleMod)) {
+                if (ForgePlatform.getInstance().isModLoaded(potentialIncompatibleMod)) {
                     if (installedIncompatibleModsString == null) {
                         installedIncompatibleModsString = potentialIncompatibleMod;
                     } else {
@@ -246,7 +246,7 @@ public class StartExportWindow {
 
             ImGui.dummy(0, 10 * ReplayUI.getUiScale());
 
-            boolean isFullscreen = Minecraft.getInstance().getWindow().isExclusiveFullscreen();
+            boolean isFullscreen = Minecraft.getInstance().getWindow().isFullscreen();
             if (isFullscreen) {
                 ImGui.separator();
                 ImGui.textWrapped(I18n.get("flashback.export_disable_fullscreen"));
@@ -302,8 +302,8 @@ public class StartExportWindow {
             if (ImGui.checkbox(I18n.get("flashback.transparent_sky"), config.internalExport.transparentBackground)) {
                 config.internalExport.transparentBackground = !config.internalExport.transparentBackground;
             }
-            if (config.internalExport.transparentBackground && !Minecraft.getInstance().options.improvedTransparency().get()) {
-                ImGui.textWrapped("It is recommended to enable 'Improved Transparency' in the Minecraft video options");
+            if (config.internalExport.transparentBackground && !Minecraft.useShaderTransparency()) {
+                ImGui.textWrapped("Use Fabulous graphics for improved translucent rendering");
             }
         } else {
             config.internalExport.transparentBackground = false;
@@ -506,7 +506,7 @@ public class StartExportWindow {
     }
 
     public static @NotNull String getDefaultFilename(@Nullable String name, String extension, FlashbackConfigV1 config) {
-        Path defaultPath = FabricLoader.getInstance().getGameDir();
+        Path defaultPath = ForgePlatform.getInstance().getGameDir();
 
         try {
             if (config.internalExport.defaultExportPath == null || config.internalExport.defaultExportPath.isBlank() || !Files.exists(Path.of(config.internalExport.defaultExportPath))) {

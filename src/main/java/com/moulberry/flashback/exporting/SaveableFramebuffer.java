@@ -1,94 +1,85 @@
 package com.moulberry.flashback.exporting;
 
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.renderpearl.api.buffers.GpuBuffer;
-import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
-import com.mojang.renderpearl.api.commands.CommandEncoder;
-import com.mojang.renderpearl.api.textures.GpuTexture;
 import org.jetbrains.annotations.Nullable;
 import org.lwjgl.system.MemoryUtil;
-
+import java.nio.ByteBuffer;
 import java.nio.FloatBuffer;
+import static org.lwjgl.opengl.GL32.*;
 
-public class SaveableFramebuffer implements AutoCloseable {
+/** An asynchronous OpenGL pixel-pack transfer; the mapped storage never escapes the frame copy. */
+public final class SaveableFramebuffer implements AutoCloseable {
     public @Nullable FloatBuffer audioBuffer;
-    private ImageFrame downloaded = null;
-    private final int width;
-    private final int height;
-    private GpuBuffer pbo;
-
-    private boolean isDownloading = false;
-
-    public static boolean fixDepthDownload = false;
+    private final int width, height;
+    private int pbo;
+    private long fence;
+    private ImageFrame.Format format;
 
     public SaveableFramebuffer(int width, int height) {
         this.width = width;
         this.height = height;
-        this.pbo = RenderSystem.getDevice().createBuffer(() -> "Flashback texture output buffer",
-            GpuBuffer.USAGE_COPY_DST | GpuBuffer.USAGE_MAP_READ, 4L*width*height);
+        int previous = glGetInteger(GL_PIXEL_PACK_BUFFER_BINDING);
+        pbo = glGenBuffers();
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+        glBufferData(GL_PIXEL_PACK_BUFFER, 4L * width * height, GL_STREAM_READ);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, previous);
     }
 
-    public void startDownload(GpuTexture gpuTexture) {
-        if (this.isDownloading) {
-            throw new IllegalStateException("Can't start downloading while already downloading");
-        }
-        this.isDownloading = true;
-
-        if (this.pbo == null) {
-            throw new IllegalStateException();
-        }
-
-        ImageFrame.Format format = switch (gpuTexture.getFormat()) {
-            case RGBA8_UNORM -> ImageFrame.Format.RGBA_U8;
-            case R32_FLOAT, D32_FLOAT -> ImageFrame.Format.GRAY_F32;
-            default -> throw new IllegalStateException("Don't know how to download format " + gpuTexture.getFormat());
-        };
-
-        CommandEncoder commandEncoder = RenderSystem.getDevice().createCommandEncoder();
-        Runnable runnable = () -> {
-            try (GpuBufferSlice.MappedView mappedView = this.pbo.map(true, false)) {
-                this.downloaded = new ImageFrame(MemoryUtil.memAddress(mappedView.data()), width, height, format);
-            }
-        };
-
+    public void startDownload(int framebuffer, boolean depth) {
+        if (fence != 0 || pbo == 0) throw new IllegalStateException("Framebuffer transfer already pending or closed");
+        format = depth ? ImageFrame.Format.GRAY_F32 : ImageFrame.Format.RGBA_U8;
+        int previousBuffer = glGetInteger(GL_PIXEL_PACK_BUFFER_BINDING);
+        int previousFramebuffer = glGetInteger(GL_READ_FRAMEBUFFER_BINDING);
+        int alignment = glGetInteger(GL_PACK_ALIGNMENT);
+        int rowLength = glGetInteger(GL_PACK_ROW_LENGTH);
+        int skipRows = glGetInteger(GL_PACK_SKIP_ROWS);
+        int skipPixels = glGetInteger(GL_PACK_SKIP_PIXELS);
         try {
-            fixDepthDownload = true;
-            commandEncoder.copyTextureToBuffer(gpuTexture, this.pbo, 0, runnable, 0);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+            glPixelStorei(GL_PACK_ALIGNMENT, 1);
+            glPixelStorei(GL_PACK_ROW_LENGTH, 0);
+            glPixelStorei(GL_PACK_SKIP_ROWS, 0);
+            glPixelStorei(GL_PACK_SKIP_PIXELS, 0);
+            glReadPixels(0, 0, width, height, depth ? GL_RED : GL_RGBA, depth ? GL_FLOAT : GL_UNSIGNED_BYTE, 0L);
+            fence = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
         } finally {
-            fixDepthDownload = false;
+            glPixelStorei(GL_PACK_ALIGNMENT, alignment);
+            glPixelStorei(GL_PACK_ROW_LENGTH, rowLength);
+            glPixelStorei(GL_PACK_SKIP_ROWS, skipRows);
+            glPixelStorei(GL_PACK_SKIP_PIXELS, skipPixels);
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, previousBuffer);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, previousFramebuffer);
         }
     }
 
     public boolean canFinishDownload() {
-        if (!this.isDownloading) {
-            throw new IllegalStateException("Can't finish downloading before download has started");
-        }
-        return this.downloaded != null;
+        if (fence == 0) throw new IllegalStateException("No framebuffer transfer pending");
+        int status = glClientWaitSync(fence, GL_SYNC_FLUSH_COMMANDS_BIT, 0);
+        if (status == GL_WAIT_FAILED) throw new IllegalStateException("OpenGL framebuffer transfer failed");
+        return status == GL_ALREADY_SIGNALED || status == GL_CONDITION_SATISFIED;
     }
 
-    public ImageFrame finishDownload() {
-        if (!this.isDownloading) {
-            throw new IllegalStateException("Can't finish downloading before download has started");
+    public @Nullable ImageFrame finishDownload() {
+        if (!canFinishDownload()) return null;
+        int previous = glGetInteger(GL_PIXEL_PACK_BUFFER_BINDING);
+        glBindBuffer(GL_PIXEL_PACK_BUFFER, pbo);
+        try {
+            ByteBuffer mapped = glMapBufferRange(GL_PIXEL_PACK_BUFFER, 0, 4L * width * height, GL_MAP_READ_BIT);
+            if (mapped == null) throw new IllegalStateException("Failed to map framebuffer transfer");
+            try {
+                return new ImageFrame(MemoryUtil.memAddress(mapped), width, height, format);
+            } finally {
+                glUnmapBuffer(GL_PIXEL_PACK_BUFFER);
+                glDeleteSync(fence);
+                fence = 0;
+            }
+        } finally {
+            glBindBuffer(GL_PIXEL_PACK_BUFFER, previous);
         }
-        if (this.downloaded == null) {
-            return null;
-        }
-
-        this.isDownloading = false;
-        ImageFrame downloaded = this.downloaded;
-        this.downloaded = null;
-        return downloaded;
     }
 
     public void close() {
-        if (this.pbo != null) {
-            this.pbo.close();
-            this.pbo = null;
-        }
-        if (this.downloaded != null) {
-            this.downloaded.close();
-            this.downloaded = null;
-        }
+        if (fence != 0) { glDeleteSync(fence); fence = 0; }
+        if (pbo != 0) { glDeleteBuffers(pbo); pbo = 0; }
     }
-
 }

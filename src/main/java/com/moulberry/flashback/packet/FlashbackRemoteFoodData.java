@@ -2,20 +2,20 @@ package com.moulberry.flashback.packet;
 
 import com.moulberry.flashback.Flashback;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
-import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import com.moulberry.flashback.packet.PacketCodec;
+import com.moulberry.flashback.packet.FlashbackPayload;
 
-public record FlashbackRemoteFoodData(int entityId, int foodLevel, float saturationLevel) implements CustomPacketPayload {
+public record FlashbackRemoteFoodData(int entityId, int foodLevel, float saturationLevel) implements FlashbackPayload {
     public static final Type<FlashbackRemoteFoodData> TYPE = new Type<>(Flashback.createIdentifier("remote_food_data"));
 
-    public static final StreamCodec<FriendlyByteBuf, FlashbackRemoteFoodData> STREAM_CODEC = new FlashbackRemoteFoodDataStreamCodec();
+    public static final PacketCodec<FriendlyByteBuf, FlashbackRemoteFoodData> STREAM_CODEC = new FlashbackRemoteFoodDataPacketCodec();
 
     @Override
-    public Type<? extends CustomPacketPayload> type() {
+    public Type<? extends FlashbackPayload> type() {
         return TYPE;
     }
 
-    public static class FlashbackRemoteFoodDataStreamCodec implements StreamCodec<FriendlyByteBuf, FlashbackRemoteFoodData> {
+    public static class FlashbackRemoteFoodDataPacketCodec implements PacketCodec<FriendlyByteBuf, FlashbackRemoteFoodData> {
         @Override
         public FlashbackRemoteFoodData decode(FriendlyByteBuf friendlyByteBuf) {
             int entityId = friendlyByteBuf.readVarInt();

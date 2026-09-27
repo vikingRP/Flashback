@@ -4,6 +4,9 @@ import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
 import com.moulberry.flashback.ext.ServerLevelExt;
 import com.moulberry.flashback.playback.ReplayServer;
+import com.moulberry.flashback.playback.ReplayPlayer;
+import net.minecraft.world.level.entity.PersistentEntitySectionManager;
+import org.spongepowered.asm.mixin.Final;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongSet;
 import net.minecraft.server.MinecraftServer;
@@ -28,6 +31,24 @@ public abstract class MixinServerLevel implements ServerLevelExt {
     @Shadow
     @NotNull
     public abstract MinecraftServer getServer();
+
+
+    @Shadow @Final private PersistentEntitySectionManager<Entity> entityManager;
+
+    /** Recorded packets own world state; only the viewer and chunk/entity transport advance. */
+    @Inject(method = "tick", at = @At("HEAD"), cancellable = true)
+    private void tickReplay(java.util.function.BooleanSupplier haveTime, CallbackInfo ci) {
+        ServerLevel level = (ServerLevel)(Object)this;
+        if (!(level.getServer() instanceof ReplayServer)) return;
+        level.getWorldBorder().tick();
+        level.getChunkSource().tick(haveTime, true);
+        for (var player : level.players()) {
+            if (player instanceof ReplayPlayer && !player.isRemoved() && !player.isPassenger())
+                level.guardEntityTick(level::tickNonPassenger, player);
+        }
+        this.entityManager.tick();
+        ci.cancel();
+    }
 
     @Unique
     private long seedHash = 0;
@@ -89,11 +110,5 @@ public abstract class MixinServerLevel implements ServerLevelExt {
         }
     }
 
-    @Inject(method = "waitForEntities", at = @At("HEAD"), cancellable = true)
-    public void waitForChunkAndEntities(ChunkPos chunkPos, int i, CallbackInfo ci) {
-        if (this.getServer() instanceof ReplayServer) {
-            ci.cancel();
-        }
-    }
 
 }

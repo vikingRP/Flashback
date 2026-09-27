@@ -26,7 +26,7 @@ import java.util.concurrent.CompletableFuture;
 public class BetterColorArgument implements ArgumentType<Integer> {
 
     private static final Collection<String> EXAMPLES = Arrays.asList("red", "green");
-    public static final DynamicCommandExceptionType ERROR_INVALID_VALUE = new DynamicCommandExceptionType(object -> Component.translatableEscape("argument.color.invalid", object));
+    public static final DynamicCommandExceptionType ERROR_INVALID_VALUE = new DynamicCommandExceptionType(object -> Component.translatable("argument.color.invalid", object));
 
     private static final List<String> names = new ArrayList<>();
     private static final Map<String, ChatFormatting> nameToFormatting = new HashMap<>();

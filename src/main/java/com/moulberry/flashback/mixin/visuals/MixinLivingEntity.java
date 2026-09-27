@@ -13,7 +13,7 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
-@Mixin(LivingEntity.class)
+@Mixin({net.minecraft.world.entity.player.Player.class, net.minecraft.world.entity.Mob.class, net.minecraft.world.entity.decoration.ArmorStand.class})
 public abstract class MixinLivingEntity extends Entity  {
 
     public MixinLivingEntity(EntityType<?> entityType, Level level) {

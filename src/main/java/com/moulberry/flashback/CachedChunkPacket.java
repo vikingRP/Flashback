@@ -28,13 +28,13 @@ public class CachedChunkPacket {
 
     public CachedChunkPacket(ClientboundLevelChunkWithLightPacket packet, int index) {
         //keysmash random numbers used
-        this.x = packet.x();
-        this.z = packet.z();
+        this.x = packet.getX();
+        this.z = packet.getZ();
         this.bigHash = computePacketBigHash(packet);
         if (this.bigHash.length == 64) {//sha-512
             long hash = 982374698276290847L;
             for (int i = 0; i < 8; i++) {
-                hash ^= (long)LONG_ARRAY.get(this.bigHash, i);
+                hash ^= (long)LONG_ARRAY.get(this.bigHash, i * Long.BYTES);
                 hash *= 209648290153981L;
                 hash += 164923702968709L;
             }
@@ -42,7 +42,7 @@ public class CachedChunkPacket {
         } else if (this.bigHash.length == 32) {//sha-256
             long hash = 150939871908751L;
             for (int i = 0; i < 4; i++) {
-                hash ^= (long)LONG_ARRAY.get(this.bigHash, i);
+                hash ^= (long)LONG_ARRAY.get(this.bigHash, i * Long.BYTES);
                 hash *= 209648290153981L;
                 hash += 164923702968709L;
             }
@@ -65,34 +65,32 @@ public class CachedChunkPacket {
             }
         }
 
-        digest.update(intToByteArray(packet.x()));
-        digest.update(intToByteArray(packet.z()));
-        digest.update(packet.chunkData().buffer);
+        digest.update(intToByteArray(packet.getX()));
+        digest.update(intToByteArray(packet.getZ()));
+        FriendlyByteBuf sectionBuffer = packet.getChunkData().getReadBuffer();
+        try { digest.update(sectionBuffer.nioBuffer()); }
+        finally { sectionBuffer.release(); }
+        FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer());
+        try {
+            packet.getLightData().write(buffer);
+            buffer.writeNbt(packet.getChunkData().getHeightmaps());
+            digest.update(buffer.nioBuffer(0, buffer.writerIndex()));
+            buffer.clear();
 
-        FriendlyByteBuf frenBuffer = new FriendlyByteBuf(Unpooled.buffer());
-
-        ClientboundLightUpdatePacketData.STREAM_CODEC.encode(frenBuffer, packet.lightData);
-        digest.update(frenBuffer.array(), 0, frenBuffer.writerIndex());
-        frenBuffer.resetWriterIndex();
-
-        digest.update(frenBuffer.array(), 0, frenBuffer.writerIndex());
-        frenBuffer.resetWriterIndex();
-
-        // Sort to ensure stable ordering
-        var copy = new ArrayList<>(packet.chunkData().blockEntitiesData);
-        copy.sort(Comparator.comparingInt(a -> (a.y() << 8) | a.packedXZ()));
-
-        for (ClientboundLevelChunkPacketData.BlockEntityInfo blockEntitiesData : copy) {
-            digest.update(blockEntitiesData.packedXZ());
-            digest.update(intToByteArray(blockEntitiesData.y()));
-            digest.update(BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntitiesData.type()).toString().getBytes(StandardCharsets.UTF_8));
-            if (blockEntitiesData.tag().isPresent()) {
-                frenBuffer.writeNbt(blockEntitiesData.tag().get());
-                digest.update(frenBuffer.array(), 0, frenBuffer.writerIndex());
-                frenBuffer.resetWriterIndex();
-            } else {
-                digest.update("NO_TAG".getBytes(StandardCharsets.UTF_8));
+            record BlockEntitySnapshot(net.minecraft.core.BlockPos position, BlockEntityType<?> type, net.minecraft.nbt.CompoundTag tag) {}
+            var blockEntities = new ArrayList<BlockEntitySnapshot>();
+            packet.getChunkData().getBlockEntitiesTagsConsumer(packet.getX(), packet.getZ()).accept((position, type, tag) ->
+                blockEntities.add(new BlockEntitySnapshot(position.immutable(), type, tag)));
+            blockEntities.sort(Comparator.comparingLong(value -> value.position().asLong()));
+            for (BlockEntitySnapshot blockEntity : blockEntities) {
+                buffer.writeBlockPos(blockEntity.position());
+                buffer.writeResourceLocation(BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntity.type()));
+                buffer.writeNbt(blockEntity.tag());
+                digest.update(buffer.nioBuffer(0, buffer.writerIndex()));
+                buffer.clear();
             }
+        } finally {
+            buffer.release();
         }
 
         return digest.digest();

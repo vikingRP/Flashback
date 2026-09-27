@@ -16,13 +16,13 @@ import it.unimi.dsi.fastutil.ints.Int2IntMap;
 import it.unimi.dsi.fastutil.ints.Int2IntOpenHashMap;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.RegistryFriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
+import com.moulberry.flashback.io.ReplayBuffer;
+import com.moulberry.flashback.packet.PacketCodec;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundLevelChunkWithLightPacket;
-import net.minecraft.network.protocol.game.GameProtocols;
-import net.minecraft.resources.Identifier;
+import com.moulberry.flashback.packet.PlayPacketCodec;
+import net.minecraft.resources.ResourceLocation;
 
 import java.io.BufferedOutputStream;
 import java.io.FileOutputStream;
@@ -45,7 +45,7 @@ import java.util.zip.ZipOutputStream;
 public class ReplayCombiner {
 
     public static void combine(RegistryAccess registryAccess, String replayName, Path first, Path second, Path output) throws Exception {
-        StreamCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec = GameProtocols.CLIENTBOUND_TEMPLATE.bind(RegistryFriendlyByteBuf.decorator(registryAccess)).codec();
+        PacketCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec = PlayPacketCodec.INSTANCE;
 
         try (FileSystem firstFileSystem = FileSystems.newFileSystem(first);
              FileSystem secondFileSystem = FileSystems.newFileSystem(second)) {
@@ -115,13 +115,13 @@ public class ReplayCombiner {
 
             // Write chunked level chunk caches
             int lastCacheIndex = -1;
-            RegistryFriendlyByteBuf chunkCacheOutput = null;
+            ReplayBuffer chunkCacheOutput = null;
             for (int i = 0; i < levelChunkPackets.size(); i++) {
                 int cacheIndex = i / ReplayChunkCache.CHUNK_CACHE_SIZE;
 
                 if (chunkCacheOutput == null) {
                     lastCacheIndex = cacheIndex;
-                    chunkCacheOutput = new RegistryFriendlyByteBuf(Unpooled.buffer(), registryAccess);
+                    chunkCacheOutput = new ReplayBuffer(Unpooled.buffer(), registryAccess);
                 } else if (cacheIndex != lastCacheIndex) {
                     byte[] bytes = new byte[chunkCacheOutput.writerIndex()];
                     chunkCacheOutput.getBytes(0, bytes);
@@ -132,7 +132,7 @@ public class ReplayCombiner {
                     zipOut.closeEntry();
 
                     lastCacheIndex = cacheIndex;
-                    chunkCacheOutput = new RegistryFriendlyByteBuf(Unpooled.buffer(), registryAccess);
+                    chunkCacheOutput = new ReplayBuffer(Unpooled.buffer(), registryAccess);
                 }
 
                 // Write placeholder value for size
@@ -173,7 +173,7 @@ public class ReplayCombiner {
 
                 Path path = entry.getValue().path();
                 byte[] replayChunk = Files.readAllBytes(path);
-                RegistryFriendlyByteBuf inputBuf = new RegistryFriendlyByteBuf(Unpooled.wrappedBuffer(replayChunk), registryAccess);
+                ReplayBuffer inputBuf = new ReplayBuffer(Unpooled.wrappedBuffer(replayChunk), registryAccess);
                 FriendlyByteBuf outputBuf = new FriendlyByteBuf(Unpooled.buffer());
 
                 int magic = inputBuf.readInt();
@@ -186,8 +186,8 @@ public class ReplayCombiner {
                 int actions = inputBuf.readVarInt();
                 outputBuf.writeVarInt(actions);
                 for (int i = 0; i < actions; i++) {
-                    Identifier actionName = inputBuf.readIdentifier();
-                    outputBuf.writeIdentifier(actionName);
+                    ResourceLocation actionName = inputBuf.readResourceLocation();
+                    outputBuf.writeResourceLocation(actionName);
 
                     Action action = ActionRegistry.getAction(actionName);
 
@@ -265,7 +265,7 @@ public class ReplayCombiner {
         }
     }
 
-    private static void extractChunks(RegistryAccess registryAccess, FileSystem fileSystem, StreamCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec,
+    private static void extractChunks(RegistryAccess registryAccess, FileSystem fileSystem, PacketCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec,
             List<ClientboundLevelChunkWithLightPacket> packets, Int2IntMap levelChunkMappings) throws IOException {
         Path levelChunkCachePath = fileSystem.getPath("/level_chunk_cache");
         if (Files.exists(levelChunkCachePath)) {
@@ -284,7 +284,7 @@ public class ReplayCombiner {
         }
     }
 
-    private static void loadLevelChunkCache(StreamCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec, RegistryAccess registryAccess,
+    private static void loadLevelChunkCache(PacketCodec<ByteBuf, Packet<? super ClientGamePacketListener>> gamePacketCodec, RegistryAccess registryAccess,
             Path levelChunkCachePath, int chunkCacheIndex, List<ClientboundLevelChunkWithLightPacket> packets, Int2IntMap levelChunkMappings) throws IOException {
         try (InputStream is = Files.newInputStream(levelChunkCachePath)) {
             while (true) {
@@ -305,7 +305,7 @@ public class ReplayCombiner {
                     break;
                 }
 
-                RegistryFriendlyByteBuf registryFriendlyByteBuf = new RegistryFriendlyByteBuf(Unpooled.wrappedBuffer(chunk), registryAccess);
+                ReplayBuffer registryFriendlyByteBuf = new ReplayBuffer(Unpooled.wrappedBuffer(chunk), registryAccess);
 
                 try {
                     Packet<?> packet = gamePacketCodec.decode(registryFriendlyByteBuf);

@@ -24,15 +24,20 @@ public class MixinClientPacketListener {
 
     @Inject(method = "handleCustomPayload", at = @At("HEAD"))
     public void handleCustomPayloadHead(CallbackInfo ci) {
-        if (Flashback.isInReplay()) {
-            this.screenBeforeHandleCustomPayload = Minecraft.getInstance().gui.screen();
+        Minecraft minecraft = Minecraft.getInstance();
+        // Forge dispatches its own channels on Netty before vanilla's main-thread guard.
+        // Recorded payloads are replayed on the client thread, where their UI can be restored safely.
+        if (Flashback.isInReplay() && minecraft.isSameThread()) {
+            this.screenBeforeHandleCustomPayload = minecraft.screen;
         }
     }
 
     @Inject(method = "handleCustomPayload", at = @At("RETURN"))
     public void handleCustomPayloadReturn(CallbackInfo ci) {
-        if (Flashback.isInReplay()) {
-            Minecraft.getInstance().gui.setScreen(this.screenBeforeHandleCustomPayload);
+        Minecraft minecraft = Minecraft.getInstance();
+        if (Flashback.isInReplay() && minecraft.isSameThread()
+            && minecraft.screen != this.screenBeforeHandleCustomPayload) {
+            minecraft.setScreen(this.screenBeforeHandleCustomPayload);
         }
     }
 

@@ -5,18 +5,18 @@ import net.minecraft.network.chat.ChatType;
 import net.minecraft.network.chat.OutgoingChatMessage;
 import net.minecraft.network.protocol.status.ServerStatus;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ClientInformation;
+
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.stats.Stat;
-import net.minecraft.world.item.crafting.RecipeHolder;
+import net.minecraft.world.item.crafting.Recipe;
 
 import java.util.Collection;
 
 public class FlashbackFakePlayer extends ServerPlayer {
 
-    public FlashbackFakePlayer(MinecraftServer minecraftServer, ServerLevel serverLevel, GameProfile gameProfile, ClientInformation clientInformation) {
-        super(minecraftServer, serverLevel, gameProfile, clientInformation);
+    public FlashbackFakePlayer(MinecraftServer minecraftServer, ServerLevel serverLevel, GameProfile gameProfile) {
+        super(minecraftServer, serverLevel, gameProfile);
     }
 
     @Override
@@ -38,7 +38,7 @@ public class FlashbackFakePlayer extends ServerPlayer {
     }
 
     @Override
-    public int awardRecipes(Collection<RecipeHolder<?>> collection) {
+    public int awardRecipes(Collection<Recipe<?>> collection) {
         return 0;
     }
 

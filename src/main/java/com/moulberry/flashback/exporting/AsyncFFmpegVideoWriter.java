@@ -61,8 +61,7 @@ public class AsyncFFmpegVideoWriter implements AutoCloseable, VideoWriter {
         if (this.started) {
             return;
         }
-        this.started = true;
-
+        FlashbackFFmpegFrameRecorder pendingRecorder = null;
         try {
             FFmpegLogCallback.set();
 
@@ -130,6 +129,7 @@ public class AsyncFFmpegVideoWriter implements AutoCloseable, VideoWriter {
             }
 
             final FlashbackFFmpegFrameRecorder recorder = new FlashbackFFmpegFrameRecorder(this.filename, width, height, audioChannels);
+            pendingRecorder = recorder;
 
             recorder.setVideoBitrate(bitrate);
             recorder.setVideoCodec(settings.codec().codecId());
@@ -169,12 +169,23 @@ public class AsyncFFmpegVideoWriter implements AutoCloseable, VideoWriter {
             this.reusePictureData = needsRescale ? new ArrayBlockingQueue<>(32) : null;
 
             Thread encodeThread = createEncodeThread(recorder);
+            Thread rescaleThread = null;
             if (needsRescale) {
-                Thread rescaleThread = createRescaleThread(width, height, dstPixelFormat);
+                rescaleThread = createRescaleThread(width, height, dstPixelFormat);
+            }
+            this.started = true;
+            if (rescaleThread != null) {
                 rescaleThread.start();
             }
             encodeThread.start();
-        } catch (IOException e) {
+        } catch (Throwable e) {
+            if (!this.started && pendingRecorder != null) {
+                try {
+                    pendingRecorder.release();
+                } catch (Throwable releaseError) {
+                    e.addSuppressed(releaseError);
+                }
+            }
             throw SneakyThrow.sneakyThrow(e);
         }
     }
@@ -364,7 +375,12 @@ public class AsyncFFmpegVideoWriter implements AutoCloseable, VideoWriter {
     }
 
     public void encode(ImageFrame src) {
-        this.tryStart(src.ffmpegPixelFormat());
+        try {
+            this.tryStart(src.ffmpegPixelFormat());
+        } catch (Throwable failure) {
+            src.close();
+            throw SneakyThrow.sneakyThrow(failure);
+        }
 
         checkEncodeError(src);
 

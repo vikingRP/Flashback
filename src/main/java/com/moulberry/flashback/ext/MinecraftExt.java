@@ -3,7 +3,7 @@ package com.moulberry.flashback.ext;
 import com.moulberry.flashback.record.FlashbackMeta;
 import net.minecraft.server.WorldStem;
 import net.minecraft.server.packs.repository.PackRepository;
-import net.minecraft.world.level.gamerules.GameRules;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.storage.LevelStorageSource;
 
 import java.nio.file.FileSystem;
@@ -19,5 +19,6 @@ public interface MinecraftExt {
     void flashback$startReplayServer(LevelStorageSource.LevelStorageAccess levelStorageAccess, PackRepository packRepository, WorldStem stem, Optional<GameRules> gameRules, StartReplayServerInfo info);
     float flashback$getLocalPlayerPartialTick(float originalPartialTick);
     boolean flashback$overridingLocalPlayerTimer();
+    boolean flashback$isTickingLocalPlayer();
 
 }
