@@ -25,6 +25,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
+import java.util.stream.Stream;
+
 @Mixin(value = ServerLevel.class, priority = 900)
 public abstract class MixinServerLevel implements ServerLevelExt {
 
@@ -93,11 +95,14 @@ public abstract class MixinServerLevel implements ServerLevelExt {
 
     // Fix for worldgen mods injecting on getGeneratorState to add custom worldgen properties
     // Lets just nuke the whole line
+    // An empty state is returned instead of null because other mods (i.e. ModernFix's stronghold cache)
+    // also wrap ensureStructuresGenerated and dereference the state before our wrapper runs
 
     @WrapOperation(method = "<init>", at = @At(value = "INVOKE", target = "Lnet/minecraft/server/level/ServerChunkCache;getGeneratorState()Lnet/minecraft/world/level/chunk/ChunkGeneratorStructureState;"))
     public ChunkGeneratorStructureState getGeneratorState(ServerChunkCache instance, Operation<ChunkGeneratorStructureState> original) {
         if (this.getServer() instanceof ReplayServer) {
-            return null;
+            return ChunkGeneratorStructureState.createForFlat(instance.randomState(), 0L,
+                instance.getGenerator().getBiomeSource(), Stream.empty());
         } else {
             return original.call(instance);
         }
@@ -105,7 +110,7 @@ public abstract class MixinServerLevel implements ServerLevelExt {
 
     @WrapOperation(method = "<init>", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/level/chunk/ChunkGeneratorStructureState;ensureStructuresGenerated()V"))
     public void ensureStructuresGenerated(ChunkGeneratorStructureState instance, Operation<Void> original) {
-        if (instance != null) {
+        if (!(this.getServer() instanceof ReplayServer)) {
             original.call(instance);
         }
     }

@@ -202,7 +202,7 @@ public class Flashback {
             Flashback.LOGGER.error("Failed to create config folder", e);
         }
 
-        config = FlashbackConfigV1.tryLoadFromFolder(configFolder);
+        config = getConfig();
         com.moulberry.flashback.exporting.NativeLibraryBootstrap.initialize(
             ForgePlatform.getInstance().getGameDir().resolve("flashback/native-cache"),
             config.exporting.useSystemFFmpeg);
@@ -929,6 +929,11 @@ public class Flashback {
     }
 
     public static FlashbackConfigV1 getConfig() {
+        // On Forge, client setup runs during the initial resource reload, but screens (i.e. the pause
+        // screen when the window loses focus) can already be opened before then
+        if (config == null) {
+            config = FlashbackConfigV1.tryLoadFromFolder(getConfigDirectory());
+        }
         return config;
     }
 

@@ -34,6 +34,7 @@
     "record.MixinClientConfigurationPacketListenerImpl",
     "record.MixinClientLevel",
     "record.MixinLocalPlayer",
+    "ui.MixinOptionsScreen",
     "ui.MixinPauseScreen",
     "ui.MixinTitleScreen",
     "visuals.MixinAbstractClientPlayer",
