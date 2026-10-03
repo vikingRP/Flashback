@@ -56,7 +56,7 @@ public enum VideoContainer implements ComboOption {
         return this.isImageSequence;
     }
 
-    public VideoCodec[] getSupportedVideoCodecs(boolean transparency) {
+    public synchronized VideoCodec[] getSupportedVideoCodecs(boolean transparency) {
         VideoCodec[] codecs = transparency ? this.supportedVideoCodecsWithTransparency : this.supportedVideoCodecs;
 
         if (codecs == null) {
@@ -96,7 +96,7 @@ public enum VideoContainer implements ComboOption {
         return codecs;
     }
 
-    public AudioCodec[] getSupportedAudioCodecs() {
+    public synchronized AudioCodec[] getSupportedAudioCodecs() {
         if (this.supportedAudioCodecs == null) {
             List<AudioCodec> supportedCodecs = new ArrayList<>();
             if (!this.isImageSequence()) {

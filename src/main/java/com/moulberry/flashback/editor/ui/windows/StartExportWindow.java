@@ -11,6 +11,7 @@ import com.moulberry.flashback.combo_options.VideoContainer;
 import com.moulberry.flashback.configuration.FlashbackConfigV1;
 import com.moulberry.flashback.editor.ui.ReplayUI;
 import com.moulberry.flashback.exporting.ExportJobQueue;
+import com.moulberry.flashback.exporting.ExportCapabilities;
 import com.moulberry.flashback.state.EditorState;
 import com.moulberry.flashback.state.EditorStateManager;
 import com.moulberry.flashback.editor.ui.ImGuiHelper;
@@ -45,9 +46,6 @@ public class StartExportWindow {
     private static AspectRatio lastCustomAspectRatio = null;
 
     private static final int[] startEndTick = new int[]{-1, -1};
-
-    private static VideoContainer[] supportedContainers = null;
-    private static VideoContainer[] supportedContainersWithTransparency = null;
 
     private static final ImString bitrate = ImGuiHelper.createResizableImString("20m");
     private static final ImString jobName = ImGuiHelper.createResizableImString("");
@@ -140,6 +138,19 @@ public class StartExportWindow {
 
             FlashbackConfigV1 config = Flashback.getConfig();
 
+            // Never wait for native encoder probing on the render thread.
+            CompletableFuture<ExportCapabilities> detection = ExportCapabilities.load();
+            if (!detection.isDone() || detection.isCompletedExceptionally()) {
+                ImGui.textUnformatted(I18n.get(detection.isCompletedExceptionally()
+                    ? "flashback.export.encoders_failed" : "flashback.export.encoders_loading"));
+                if (detection.isCompletedExceptionally() && ImGui.button(I18n.get("flashback.export.encoders_retry"))) {
+                    ExportCapabilities.retry();
+                }
+                ImGuiHelper.endPopupModalCloseable();
+                return;
+            }
+            ExportCapabilities capabilities = detection.join();
+
             ImGuiHelper.separatorWithText(I18n.get("flashback.capture_options"));
 
             ImGuiHelper.inputInt(I18n.get("flashback.resolution"), config.internalExport.resolution);
@@ -206,7 +217,10 @@ public class StartExportWindow {
 
             ImGuiHelper.separatorWithText(I18n.get("flashback.video_options"));
 
-            renderVideoOptions(editorState, config);
+            if (!renderVideoOptions(editorState, config, capabilities)) {
+                ImGuiHelper.endPopupModalCloseable();
+                return;
+            }
 
             AudioCodec[] supportedAudioCodecs = config.internalExport.container.getSupportedAudioCodecs();
             if (supportedAudioCodecs.length > 0) {
@@ -297,7 +311,7 @@ public class StartExportWindow {
         }
     }
 
-    private static void renderVideoOptions(EditorState editorState, FlashbackConfigV1 config) {
+    private static boolean renderVideoOptions(EditorState editorState, FlashbackConfigV1 config, ExportCapabilities capabilities) {
         if (editorState != null && !editorState.replayVisuals.renderSky) {
             if (ImGui.checkbox(I18n.get("flashback.transparent_sky"), config.internalExport.transparentBackground)) {
                 config.internalExport.transparentBackground = !config.internalExport.transparentBackground;
@@ -309,22 +323,12 @@ public class StartExportWindow {
             config.internalExport.transparentBackground = false;
         }
 
-        VideoContainer[] containers;
-        if (config.internalExport.transparentBackground) {
-            if (supportedContainersWithTransparency == null) {
-                supportedContainersWithTransparency = VideoContainer.findSupportedContainers(true);
-            }
-            containers = supportedContainersWithTransparency;
-        } else {
-            if (supportedContainers == null) {
-                supportedContainers = VideoContainer.findSupportedContainers(false);
-            }
-            containers = supportedContainers;
-        }
+        VideoContainer[] containers = config.internalExport.transparentBackground
+            ? capabilities.transparentContainers() : capabilities.containers();
 
         if (containers.length == 0) {
             ImGui.textUnformatted(I18n.get("flashback.no_supported_containers_found"));
-            return;
+            return false;
         }
 
         if (config.internalExport.container == null || !Arrays.asList(containers).contains(config.internalExport.container)) {
@@ -335,13 +339,13 @@ public class StartExportWindow {
 
         if (config.internalExport.container.isImageSequence()) {
             ImGui.inputText(I18n.get("flashback.filenames"), pngSequenceFormat);
-            return;
+            return true;
         }
 
         VideoCodec[] codecs = config.internalExport.container.getSupportedVideoCodecs(config.internalExport.transparentBackground);
         if (codecs.length == 0) {
             ImGui.textUnformatted(I18n.get("flashback.no_supported_codecs_found"));
-            return;
+            return false;
         }
 
         if (config.internalExport.videoCodec == null || !Arrays.asList(codecs).contains(config.internalExport.videoCodec)) {
@@ -390,6 +394,7 @@ public class StartExportWindow {
             ImGui.textColored(0xFFFFFFFF, I18n.get("flashback.gif_output_warning"));
             ImGui.popTextWrapPos();
         }
+        return true;
     }
 
     private static CompletableFuture<ExportSettings> createExportSettings(@Nullable String name, FlashbackConfigV1 config) {
@@ -577,6 +582,7 @@ public class StartExportWindow {
     }
 
     public static void open() {
+        ExportCapabilities.load();
         open = true;
 
         EditorState editorState = EditorStateManager.getCurrent();

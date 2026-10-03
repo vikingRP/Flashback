@@ -34,7 +34,7 @@ public enum AudioCodec implements ComboOption {
         return this.codecId;
     }
 
-    public String[] getEncoders() {
+    public synchronized String[] getEncoders() {
         if (this.encoders == null) {
             List<String> encodersHardware = new ArrayList<>();
             List<String> encodersHybrid = new ArrayList<>();

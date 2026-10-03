@@ -1,4 +1,7 @@
 {
+  "flashback.export.encoders_loading": "Detecting available video encoders...",
+  "flashback.export.encoders_failed": "Could not detect video encoders. See the log for details.",
+  "flashback.export.encoders_retry": "Retry",
   "modmenu.nameTranslation.flashback": "Flashback",
   "modmenu.descriptionTranslation.flashback": "Record your Minecraft gameplay, play it back and create stunning cinematic shots",
 

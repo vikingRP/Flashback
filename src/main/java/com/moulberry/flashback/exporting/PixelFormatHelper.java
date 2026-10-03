@@ -22,7 +22,7 @@ public class PixelFormatHelper {
     private record BestFormatKey(String codec, int srcPixelFormat, boolean transparent) {}
     private static final Map<BestFormatKey, Integer> bestPixelFormats = new HashMap<>();
 
-    public static int getBestPixelFormat(String codecName, int srcPixelFormat, boolean transparent) {
+    public static synchronized int getBestPixelFormat(String codecName, int srcPixelFormat, boolean transparent) {
         BestFormatKey key = new BestFormatKey(codecName, srcPixelFormat, transparent);
 
         if (bestPixelFormats.containsKey(key)) {
@@ -88,7 +88,7 @@ public class PixelFormatHelper {
     // Pixel format supports transparency
     private static final Int2BooleanMap pixelFormatSupportsTransparency = new Int2BooleanOpenHashMap();
 
-    public static boolean doesPixelFormatSupportTransparency(int pixelFormat) {
+    public static synchronized boolean doesPixelFormatSupportTransparency(int pixelFormat) {
         if (pixelFormatSupportsTransparency.containsKey(pixelFormat)) {
             return pixelFormatSupportsTransparency.get(pixelFormat);
         }
@@ -111,7 +111,7 @@ public class PixelFormatHelper {
     // Pixel format names
     private static final Int2ObjectMap<String> pixelFormatNames = new Int2ObjectOpenHashMap<>();
 
-    public static String pixelFormatToString(int pixelFormat) {
+    public static synchronized String pixelFormatToString(int pixelFormat) {
         if (pixelFormatNames.containsKey(pixelFormat)) {
             return pixelFormatNames.get(pixelFormat);
         }

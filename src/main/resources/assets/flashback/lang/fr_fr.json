@@ -1,4 +1,7 @@
 {
+  "flashback.export.encoders_loading": "Détection des encodeurs vidéo disponibles…",
+  "flashback.export.encoders_failed": "Impossible de détecter les encodeurs vidéo. Consultez le journal pour plus de détails.",
+  "flashback.export.encoders_retry": "Réessayer",
   "modmenu.nameTranslation.flashback": "Flashback",
   "modmenu.descriptionTranslation.flashback": "Enregistre ta partie Minecraft, rejoue-la et créer des plans cinématographiques époustouflants",
 

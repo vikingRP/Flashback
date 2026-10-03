@@ -33,5 +33,10 @@ the MP4 and verifies 24 frames at 64?48, one-second duration and audible stereo
 devices; the test uses the embedded software H.264 encoder (`libopenh264` here).
 Run after Gradle finishes, since it rebuilds the classes and embedded runtime.
 
+The export check also exercises background encoder detection with the embedded
+native libraries. It blocks probing with a container monitor to verify that the
+caller returns without waiting, checks that repeated opens share pending and
+completed detection, and validates video, audio and transparency capabilities.
+
 ImGui interaction, OpenAL sound capture, camera orientation and replay playback
 still require full client integration checks.

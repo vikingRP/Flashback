@@ -41,6 +41,28 @@ public final class ClientExportSmoke {
         Path directory = Path.of(args[0]);
         Files.createDirectories(directory);
         NativeLibraryBootstrap.initialize(directory.resolve("native-cache"), false);
+        java.util.concurrent.CompletableFuture<ExportCapabilities> detection;
+        // Hold the first container's monitor so probing cannot finish. Opening the
+        // dialog repeatedly must still return immediately and share the same work.
+        synchronized (VideoContainer.MP4) {
+            detection = ExportCapabilities.load();
+            require(!detection.isDone(), "Encoder detection does not run on the caller thread");
+            require(ExportCapabilities.load() == detection, "Repeated opens share pending detection");
+        }
+        ExportCapabilities capabilities = detection.get(120, java.util.concurrent.TimeUnit.SECONDS);
+        require(java.util.Arrays.asList(capabilities.containers()).contains(VideoContainer.MP4), "MP4 available after detection");
+        require(java.util.Arrays.asList(capabilities.transparentContainers()).contains(VideoContainer.PNG_SEQUENCE), "Transparent PNG available after detection");
+        require(ExportCapabilities.load() == detection, "Completed detection reused on reopening");
+        for (VideoContainer container : VideoContainer.values()) {
+            require(container.getSupportedAudioCodecs() != null, "Audio support loaded for " + container);
+            for (boolean transparent : new boolean[] {false, true}) {
+                for (VideoCodec codec : container.getSupportedVideoCodecs(transparent)) {
+                    require(codec.getEncoders().length > 0, "Detected codec has an encoder");
+                    require(!transparent || codec.supportsTransparency(), "Transparent codec supports alpha");
+                }
+            }
+        }
+        System.out.println("PASS: nonblocking encoder detection, shared pending/completed cache, video/audio/alpha capabilities");
         for (String candidate : new String[] { "libx264", "libopenh264" }) {
             if (org.bytedeco.ffmpeg.global.avcodec.avcodec_find_encoder_by_name(candidate) != null) {
                 h264Encoder = candidate; break;
